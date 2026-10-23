@@ -1,4 +1,4 @@
- ──────────────── Core Telegram ────────────────
+
 python-telegram-bot>=21.6       # Hoster bot (needs recent version for button `style`)
 telethon>=1.36.0                # Userbot engine + session generation
 
