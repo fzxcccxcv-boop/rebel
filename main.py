@@ -5,7 +5,6 @@ import re
 import sys
 import time
 import random
-import telethon
 from telethon import TelegramClient, events, Button, functions, types
 from telethon.errors import (
     AuthKeyDuplicatedError,
@@ -32,15 +31,16 @@ from telethon.tl.functions.channels import (
     GetParticipantRequest,
     JoinChannelRequest
 )
-# FORCED IMPORT: This requires Telethon >= 1.36.0
 from telethon.tl.types import (
     ChatAdminRights,
     ReactionEmoji,
-    DocumentAttributeAudio,
-    KeyboardButtonCallback,
-    KeyboardButtonUrl,
-    KeyboardButtonStyle
+    DocumentAttributeAudio
 )
+
+# Safe import for colored buttons (prevents ImportError crash on older/custom Telethon builds)
+KeyboardButtonCallback = getattr(types, "KeyboardButtonCallback", None)
+KeyboardButtonUrl = getattr(types, "KeyboardButtonUrl", None)
+KeyboardButtonStyle = getattr(types, "KeyboardButtonStyle", None)
 
 import yt_dlp
 
@@ -396,27 +396,37 @@ def get_credentials(user_id):
     creds = load_credentials()
     return creds.get(str(user_id))
 
-# ── FORCED COLORFUL BUTTON HELPERS ─────────────────────────────────────────────
+# ── COLORFUL BUTTON HELPERS ────────────────────────────────────────────────────
 
 def color_button(text: str, data: bytes, style: str = "primary"):
-    """Green (success) / Blue (primary) / Red (danger) callback button."""
-    if style == "success":
-        btn_style = KeyboardButtonStyle(bg_success=True)
-    elif style == "danger":
-        btn_style = KeyboardButtonStyle(bg_danger=True)
-    else:
-        btn_style = KeyboardButtonStyle(bg_primary=True)
-    return KeyboardButtonCallback(text, data, style=btn_style)
+    """Green (success) / Blue (primary) / Red (danger) callback button with safe fallback."""
+    if KeyboardButtonCallback and KeyboardButtonStyle:
+        try:
+            if style == "success":
+                btn_style = KeyboardButtonStyle(bg_success=True)
+            elif style == "danger":
+                btn_style = KeyboardButtonStyle(bg_danger=True)
+            else:
+                btn_style = KeyboardButtonStyle(bg_primary=True)
+            return KeyboardButtonCallback(text, data, style=btn_style)
+        except Exception:
+            pass
+    return Button.inline(text, data)
 
 def color_url_button(text: str, url: str, style: str = "primary"):
-    """Green (success) / Blue (primary) / Red (danger) URL button."""
-    if style == "success":
-        btn_style = KeyboardButtonStyle(bg_success=True)
-    elif style == "danger":
-        btn_style = KeyboardButtonStyle(bg_danger=True)
-    else:
-        btn_style = KeyboardButtonStyle(bg_primary=True)
-    return KeyboardButtonUrl(text, url, style=btn_style)
+    """Green (success) / Blue (primary) / Red (danger) URL button with safe fallback."""
+    if KeyboardButtonUrl and KeyboardButtonStyle:
+        try:
+            if style == "success":
+                btn_style = KeyboardButtonStyle(bg_success=True)
+            elif style == "danger":
+                btn_style = KeyboardButtonStyle(bg_danger=True)
+            else:
+                btn_style = KeyboardButtonStyle(bg_primary=True)
+            return KeyboardButtonUrl(text, url, style=btn_style)
+        except Exception:
+            pass
+    return Button.url(text, url)
 
 # ── HELPERS ────────────────────────────────────────────────────────────────────
 
@@ -1719,7 +1729,7 @@ async def admin_reset_callback(event):
     await status_msg.edit("✅ **𝐒ᴇʀᴠᴇʀ 𝐑ᴇꜱᴇᴛ 𝐂ᴏᴍᴘʟᴇᴛᴇ!**")
 
 async def main():
-    print(f"🚀 𝐒ᴛᴀʀᴛɪɴɢ 𝐂ᴏɴᴛʀᴏʟʟᴇʀ 𝐁ᴏᴛ (Telethon {telethon.__version__})...")
+    print("🚀 𝐒ᴛᴀʀᴛɪɴɢ 𝐂ᴏɴᴛʀᴏʟʟᴇʀ 𝐁ᴏᴛ...")
     await controller_bot.start(bot_token=BOT_TOKEN)
 
     try:
