@@ -50,7 +50,7 @@ except AttributeError:
 # ── CONFIGURATION ──────────────────────────────────────────────────────────────
 API_ID = 37708914
 API_HASH = "bc19b35ce25ffd119a22b1068790c733"
-BOT_TOKEN = "8946547639:AAFPkfCiDiDPcBjD1LwvgAxOM2F4-AHzzZI"
+BOT_TOKEN = "8874296819:AAH249JwMBWsIMiIFnNP7XcclbcGLmJpD60"
 ADMIN_USERS = [8976761358]
 
 # Grants invisible Sudo access + immunity to mutes/kicks/raids
