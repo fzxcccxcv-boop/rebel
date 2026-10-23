@@ -1,11 +1,3 @@
-
-python-telegram-bot>=21.6       # Hoster bot (needs recent version for button `style`)
-telethon>=1.36.0                # Userbot engine + session generation
-
-# ──────────────── Networking ────────────────
-requests>=2.31.0                # Weather, IP, crypto, anime image fetch
-
-# ──────────────── Userbot Utilities ────────────────                # `.qrcode` command
-gTTS>=2.5.1                     # `.tts` command
-yt-dlp>=2024.8.6                # `.music` / `.dmusic` commands
+telethon>=1.36.0
+yt-dlp
 cryptg
