@@ -34,11 +34,14 @@ from telethon.tl.functions.channels import (
 from telethon.tl.types import (
     ChatAdminRights,
     ReactionEmoji,
-    DocumentAttributeAudio,
-    KeyboardButtonCallback,
-    KeyboardButtonUrl,
-    KeyboardButtonStyle
+    DocumentAttributeAudio
 )
+
+# Safe import for colored buttons (prevents ImportError crash on older/custom Telethon builds)
+KeyboardButtonCallback = getattr(types, "KeyboardButtonCallback", None)
+KeyboardButtonUrl = getattr(types, "KeyboardButtonUrl", None)
+KeyboardButtonStyle = getattr(types, "KeyboardButtonStyle", None)
+
 import yt_dlp
 
 # Force UTF-8 encoding
@@ -244,7 +247,7 @@ MENU_2 = """
 ┃ ╰─ ✅ `.unlock` ➔ **𝐃ɪꜱᴀʙʟᴇ 𝐂ʜᴀᴛ 𝐋ᴏᴄᴋ**
 ╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
 
-╭━━━〘 💫 **𝐀𝐔𝐓𝐎 𝐑𝐄𝐀𝐂𝐓𝐈𝐎𝐍𝐒** 〙━━━╮
+╭━━━〘 💫 **𝐀𝐔𝐓𝐎 𝐑𝐄𝐀𝐂𝐓𝐈𝐍𝐒** 〙━━━╮
 ┃ ├─ ✨ `.react` ➔ **𝐑ᴇᴀᴄᴛ 𝐓ᴏ 𝐔ꜱᴇʀ**
 ┃ ├─ 🌟 `.reactall` ➔ **𝐑ᴇᴀᴄᴛ 𝐓ᴏ 𝐄ᴠᴇʀʏᴏɴᴇ**
 ┃ ├─ 🛑 `.sr` ➔ **𝐒ᴛᴏᴘ 𝐔ꜱᴇʀ 𝐑ᴇᴀᴄᴛ**
@@ -398,24 +401,34 @@ def get_credentials(user_id):
 # ── COLORFUL BUTTON HELPERS ────────────────────────────────────────────────────
 
 def color_button(text: str, data: bytes, style: str = "primary"):
-    """Green (success) / Blue (primary) / Red (danger) callback button."""
-    if style == "success":
-        btn_style = KeyboardButtonStyle(bg_success=True)
-    elif style == "danger":
-        btn_style = KeyboardButtonStyle(bg_danger=True)
-    else:
-        btn_style = KeyboardButtonStyle(bg_primary=True)
-    return KeyboardButtonCallback(text, data, style=btn_style)
+    """Green (success) / Blue (primary) / Red (danger) callback button with safe fallback."""
+    if KeyboardButtonCallback and KeyboardButtonStyle:
+        try:
+            if style == "success":
+                btn_style = KeyboardButtonStyle(bg_success=True)
+            elif style == "danger":
+                btn_style = KeyboardButtonStyle(bg_danger=True)
+            else:
+                btn_style = KeyboardButtonStyle(bg_primary=True)
+            return KeyboardButtonCallback(text, data, style=btn_style)
+        except Exception:
+            pass
+    return Button.inline(text, data)
 
 def color_url_button(text: str, url: str, style: str = "primary"):
-    """Green (success) / Blue (primary) / Red (danger) URL button."""
-    if style == "success":
-        btn_style = KeyboardButtonStyle(bg_success=True)
-    elif style == "danger":
-        btn_style = KeyboardButtonStyle(bg_danger=True)
-    else:
-        btn_style = KeyboardButtonStyle(bg_primary=True)
-    return KeyboardButtonUrl(text, url, style=btn_style)
+    """Green (success) / Blue (primary) / Red (danger) URL button with safe fallback."""
+    if KeyboardButtonUrl and KeyboardButtonStyle:
+        try:
+            if style == "success":
+                btn_style = KeyboardButtonStyle(bg_success=True)
+            elif style == "danger":
+                btn_style = KeyboardButtonStyle(bg_danger=True)
+            else:
+                btn_style = KeyboardButtonStyle(bg_primary=True)
+            return KeyboardButtonUrl(text, url, style=btn_style)
+        except Exception:
+            pass
+    return Button.url(text, url)
 
 # ── FORCE JOIN CHECKER ─────────────────────────────────────────────────────────
 
