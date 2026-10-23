@@ -1,6 +1,5 @@
 # Core Telegram library (required)
 telethon>=1.36.0
-
 # Media downloader (required for the .song command)
 yt-dlp
 
