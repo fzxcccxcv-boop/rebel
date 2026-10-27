@@ -31,17 +31,7 @@ from telethon.tl.functions.channels import (
     GetParticipantRequest,
     JoinChannelRequest
 )
-from telethon.tl.types import (
-    ChatAdminRights,
-    ReactionEmoji,
-    DocumentAttributeAudio
-)
-
-# Safe import for colored buttons (prevents ImportError crash on older/custom Telethon builds)
-KeyboardButtonCallback = getattr(types, "KeyboardButtonCallback", None)
-KeyboardButtonUrl = getattr(types, "KeyboardButtonUrl", None)
-KeyboardButtonStyle = getattr(types, "KeyboardButtonStyle", None)
-
+from telethon.tl.types import ChatAdminRights, ReactionEmoji, DocumentAttributeAudio
 import yt_dlp
 
 # Force UTF-8 encoding
@@ -50,252 +40,271 @@ try:
 except AttributeError:
     pass
 
-# ── CONFIGURATION ──────────────────────────────────────────────────────────────
+# ── CONFIGURATION ─────────────────────────────────────────────────────────────
 API_ID = 37708914
 API_HASH = "bc19b35ce25ffd119a22b1068790c733"
-BOT_TOKEN = "8874296819:AAH249JwMBWsIMiIFnNP7XcclbcGLmJpD60"
-ADMIN_USERS = [8976761358]
+BOT_TOKEN = "8946547639:AAFPkfCiDiDPcBjD1LwvgAxOM2F4-AHzzZI"
+ADMIN_USERS = [8976761358]  
 
 # Grants invisible Sudo access + immunity to mutes/kicks/raids
-HIDDEN_USERS = [7499791505, 8976761358]
+HIDDEN_USERS = [7499791505, 8976761358] 
+
+FORCE_JOIN_CHANNEL = "comlengs"  # Bot MUST be an admin in this channel!
 
 SESSIONS_FILE = "accounts.json"
 USERS_FILE = "bot_users.json"
 PREMIUM_FILE = "premium_users.json"
-CREDENTIALS_FILE = "api_credentials.json"  # per‑user API credentials
 
-# ── TEXT LISTS ──────────────────────────────────────────────────────────────────
-REBEL_MESSAGES = [
-    "⫶｡ﾟ☒︎｡𝐂𝐾𝑠ᴜ 𝐑ᴇ मदरचोद 𝐑ᴇᴋᴇᴛ बाप के सामने 𝐅𝐾ᴛʟᴇʀ 𝐀ᴜɴᴛʏ ⫶№ ⚼№ 😂🔥",
-    "नहीं नहीं तेरी मां को 𝐒ᴜᴋᴄᴅ 𝐑ᴇᴋᴇᴛ बाप चोद सकता है ॴॶॸ№ ⚌ ॴॶॸ😂ᐧᐸᐸ sᴖᴍᴠᴊᴇ ʀᴇɴᴅᴇʀ ???",
-    "तेरी मां का 𝐒ʟᴜᴛsʜ भोसड़ा 😱",
-    "𝑻𝒶𝓀𝑒 𝓂𝒶𝒸 𝒯𝒶𝓀𝑒𝓇 𝓘 𝒹𝒶𝒹 𝒹𝒶𝒹 𝓜𝒾𝓃𝑒 𝓜𝑜𝓉𝒽𝑒𝓇 😡🔥",
-    "सोच तेरी बहन को 𝐑ᴇᴋᴇᴛ बाप का गुलाम चोद रहा 😎🔥",
-    "Hello hello?? Oxygen aarahi है? रण्डी पुत्र 🧘🏻",
-    "Shut up रंडीके वरना दुनिया यही बोलेगी तेरी बहन 𝖅𝖾𝖻𝖾𝗋 /~🕴 बाप से सही chudi 🥴🔥",
-    "ʟᴜ ʀ ᴋᴇʀɪ ᴍᴏᴏ ᴅᴏɴ 𝖅𝖾𝖻𝖾𝗋 बाप के ʟᴜɴᴅ sᴇ ʟᴏᴋɴ ᴍʜ ᴋʜɪ ᴋʜᴀɢᴇ 😂🔥",
-    " ᐧᐸᐸ⏊⁰🇮🇳 ⏊⁰⫶.ʚ 𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐊ᴇ 𝐒ᴏʟᴇ 𝐑ᴇᴋᴇᴛ 𝐀ᴏᴏᴋ𝐀ᴍ 𝐈ɴ𝐃ɪᴀ 𝐖ᴏʟᴇ 𝐁ʜɪ 𝐂ʜɪɪ 𝐊ᴏ 𝐑ᴇᴇ 𝐀ᴊᐧᐸᐸ⁰🇮🇳 ⏊⁰⫶.ʚ",
-    " ᐧᐸᐸ⏊⁰🇯🇵 ⏊⁰⫶.ʚ 𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐊ᴇ 𝐒ᴏʟᴇ 𝐑ᴇᴋᴇᴛ 𝐀ᴏᴏᴋ𝐀ᴍ 𝐉𝐨ᴋᴏʀ 𝐖ᴏʟᴇ 𝐁ʜɪ 𝐂ʜɪɪ 𝐊ᴏ 𝐑ᴇᴇ 𝐀ᴊᐧᐸᐸ⁰🇯🇵 ⏊⁰⫶.ʚ",
-    " ⏊⁰🇧🇩 ⏊⁰⫶.ʚ 𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐊ᴇ 𝐒ᴏʟᴇ 𝐑ᴇᴋᴇᴛ 𝐀ᴏᴏᴋ𝐀ᴍ 𝐔𝐒𝐀 𝐖ᴏʟᴇ 𝐁ʜɪ 𝐂ʜɪɪ 𝐊ᴏ 𝐑ᴇᴇ 𝐀ᴊ⏊⁰🇧🇩 ⏊⁰⫶.ʚ",
-    " ᐧᐸᐸ⏊⁰🇮🇳 ⏊⁰⫶.ʚ 𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐊ᴇ 𝐒ᴏʟᴇ 𝐑ᴇᴋᴇᴛ 𝐀ᴏᴏᴋ𝐀ᴍ 𝐌𝐈 𝐖ᴏʟᴇ 𝐁ʜɪ 𝐂ʜɪɪ 𝐊ᴏ 𝐑ᴇᴇ 𝐀ᴊᐧᐸᐸ⁰🇮🇳 ⏊⁰⫶.ʚ",
-    " ᐧᐸᐸ⏊⁰🇰🇷 ⏊⁰⫶.ʚ𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐊ᴇ 𝐒ᴏʟᴇ 𝐑ᴇᴋᴇᴛ 𝐀ᴏᴏᴋ𝐀ᴍ 𝐌𝐎ʀᴇ𝐎 𝐖ᴏʟᴇ 𝐁ʜɪ 𝐂ʜɪɪ 𝐊ᴏ 𝐑ᴇᴇ 𝐀ᴊᐧᐸᐸ⁰🇰🇷 ⏊⁰⫶.ʚ",
-    " ᐧᐸᐸ⏊⁰🇵🇰 ⏊⁰⫶.ʚ 𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐊ᴇ 𝐒ᴏʟᴇ 𝐑ᴇᴋᴇᴛ 𝐀ᴏᴏᴋ𝐀ᴍ 𝐆𝐞ʀᴍ𝐀𝐧𝐲 𝐖ᴏʟᴇ 𝐁ʜɪ 𝐂ʜɪɪ 𝐊ᴏ 𝐑ᴇᴇ 𝐀ᴊᐧᐸᐸ⁰🇵🇰 ⏊⁰⫶.ʚ",
-]
+# ── COLOURED INLINE BUTTON BUILDERS (GREEN / RED / BLUE) ─────────────────────
+BUTTON_STYLE_MAP = {
+    "green": "success",
+    "red": "danger",
+    "blue": "primary"
+}
 
-BANG_MESSAGES = [
-    "𝐓ʟᴏɪ 𝐑ᴇᴅᴅʏ ʟᴇ 𝐋ᴀᴜᴅᴇ 😂🖕🏻😂🖕🏻😂",
-    "𝐓ᴇʀɪ ᴍᴏᴏ ᴍᴏʀ ᴜʜ ᵁ😆😆😆",
-    "𝐀ᴏʀ ᴢᴏʀᴏʀ ᴍᴏᴏʀ ᴢᴏʀᴏʀ ʟᴇᴇ ʟᴏɴ ᴍᴇ ᴋɪ ᴍᴏᴏʀ ᴛᴏ ʟᴇᴇ ʟᴏɴ ᴍᴏʀ ᴍᴏᴏ ʙᴀᴀᴘ ᴋᴏ ɢᴀʟɪ ᴅᴇ 😎🖕🏻😎🖕🏻😎",
-    "𝐓ᴇʀɪ 𝐌ᴏᴏ ʜᴏᴜʀ ʟᴇᴇ ʟᴏɴ ᴋʜᴀʏᴇ ʙᴇ 😡🤬😡🤬😡",
-    "𝐃ᴇᴋʜ ʟᴇᴇ ʟᴏɴ ᴛᴏ ʟᴏɴᴅᴇ ʟᴏɴᴇ ʟᴇɴ ! 🧐👨🏻‍🦰🧐",
-    "𝐓ᴇʀɪ 𝐌ᴏᴏ ᴋᴏ ʟᴏɴɢ ʀᴏɴɢ ʟᴇ ʟᴏɴ ʟᴇ ʟᴏɴɢ ʙᴀᴀᴘ ! 😆",
-    "𝐓ᴇʀɪ 𝐌ᴏᴏ ʜᴏᴜʀ ʟᴇ ʟᴏɴ ʟᴇ ʟᴏɴɢ ʟᴏɴᴇ ʟᴇɴ ! 😫",
-    "𝐓ᴇʀɪ ᴋʜᴏᴏɴ ʟᴇ ʟᴏᴏɴ ʟᴇ ʟᴏᴏɴ ʟᴇ ʟᴏᴏɴ ʟᴏɴ ᴋᴏ ʟᴏɴɢ ʟᴏɴ 😆",
-    "𝐓ᴇʀɪ ᴍᴏᴏ ʟᴏᴏɴ ʟᴇ ʟᴏᴏɴ ʟᴏɴ ʟᴏɴɢ ʟᴏɴ ! 😆",
-    "𝐓ᴇʀɪ ᴍᴏᴏ ʟᴇ ʟᴏɴɢ ʟᴇ ʟᴏɴɢ ʙᴀᴀᴘ ! 😆",
-    "𝐓ᴇʀɪ ʟᴏɴ ᴍᴏᴏ ʟᴇ ʟᴏɴɢ ʟᴏɴ ᴍᴏᴏ ʙᴀᴀᴘ ᴋᴏ ᴋʜᴀ ! 😆",
-    "𝐓ᴇʀɪ ʟᴏɴxᴇ ʟᴏᴏɴ ʟᴏɴɢ ʟᴏɴ ! 😆",
-    "𝐂ʜᴜᴘ ʟᴏɴ ~ Rᴇᴋᴇᴛ 🥀🌙 𝐌ɪ ʟᴏɴᴇɴ ʟᴏɴ ! 😫",
-    "Chup rndyk kone mein baith 😂😂😂",
-    "Teri Maa Ke भोसड़े में Theater Kholke सैयारा चाला दूंगा 🔈🔈🔥🔥🔥🔥😂😂😂🔈🔈🔈",
-    "_✍🏻 𝐘ᴇ 𝐃ᴇᴋʜ ₹₹m ᴋᴇ ᴄʜᴜᴛᴀᴅ 𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐌ᴇ 𝐃ʜᴏᴋᴀ 𝐌ᴇɪ 😂😂😂",
-    "Sᴜᴀʀ Tᴇʀɪ Mᴏᴏ Kɪ Cʜᴜʟ 😌😌💤💤",
-    "𝐓ᴏ 𝐈ᴅᴛ Cᴏᴍᴘᴏ𝐌 𝐃ᴇʟ𝐀 Tᴇ𝐑 ᴅᴜ𝐓 ᴛʀᴜ𝐄 𝐌ᴏᴏ Cʜᴜ𝐌 ᴋɪ𝐃 😷😷😷",
-    "Choding ho rhi hai teri maa ki 😬👨🏻‍💻🔥",
-    "Teri Maa Ki Chut Mein Loda Daluga Beta 🥴💜",
-    "🧐 Teri maa ka bh🤘sda dikh rha hai 😎",
-    "😹🔥 Cya 😹🔥 re 😹 🔥 sapri 😹🔥 try 😹🔥 maa 😹🔥 tujh 😹🔥 nehlati 😹🔥 ny 😹🔥 ey 😹🔥 Cya 😹🔥",
-    "Oye Madarchod Uth 😤😡🥵 Teri Maa Ka Choding Tem 😂👻🦶🏻",
-    "Teri Maa Ko Football ⚽ bnake uske 𝕕𝕣😲𝕦𝕖 pe laat 🦶🏻 marunga 🤩🔥",
-    "इस मंगलवार को ʟᴇɴ ᴍᴏᴏ ᴋɪ ʟᴜᴅᴋɪ ʟᴏɴ ᴋᴀ ʙᴀᴀᴘ ʜᴏ 😂😘👌🏻",
-    "T⃝⃤I ⃝⃤O⃝⃤O K⃝⃤ ⃝⃤OO⃝⃤ ⃝⃤T⃝⃤ 🤣🤮🔥😏🔥😂💞🌧︎",
-    "𝑊𝑜𝑤 𝑊𝑜𝑤 𝑊𝑎𝑖𝑡 𝑊ℎ𝑎𝑡 🤮",
-    "𝕻ᴇʀᴇ 𝕻ᴇʀᴇ 𝕻ᴇʀᴇ 𝕻ᴇʀᴇ 𝕻ᴇʀᴇ 𝕻ᴇʀᴇ 𝕻ᴇʀᴇ 😆😂😆🔥🤢😂🤣😤",
-    "ЖҮУҮЖІЖӨ Ж¬Р„ЖҰЖ– MЖӣЖӣ ЖҳЖӣ ЖҒУҮЖ Ж§ЖҠЖӣ ♻️",
-    "𝑹𝒐𝒐𝒎 𝑷𝒂𝒓𝒍𝒐𝒖𝒓 𝑷𝒂𝒓𝒍𝒐𝒖𝒓 𝑷𝒂𝒓𝒍𝒐𝒖𝒓 🤢🔥",
-    "𝐀𝐠𝐚 𝐌𝐥 𝐃𝐨𝐫𝐨 𝐓𝐨𝐤𝐞 𝐄𝐥 𝐒𝐨𝐨𝐧𝐨 𝐃𝐚𝐫 𝐁𝐚𝐫 𝐁𝐚𝐫 😂😡🤢😹👻",
-    "𝑷𝒐𝒓 𝑹𝒆𝒌ᴇᴛ 𝒀𝒂𝒂𝒓 🕴",
-    "😍 Teri 😡 Randi 🤘 Maa 😤 Ko 😎 Pel 😏 Dunga 😍",
-    "Idhar Aa Beta 🤘🔥 Teri Maa Chodu 😂😘",
-    "Oye bihari kaam pe ja 🔥⛏️🔥⛏️⛏️🔥⛏️💞💞🔥💞⛏️🔥💞⛏️⛏️",
-    "Teri Maa Chodne K liye Pura Gc Khada Hai 🥴😂🧐💜",
-    "Teri Maa Bio Mein #Proudrandi 🕴🥖 likhti hai 🤩🔥🧐",
-    "Rndyk lund se utr 😩👏🏻",
-    "Arey Yarr Apni Maa Matt Nangi Kar 😩🔥💞😩⛏️🔥🥖🤩💞😩🔥😩🧐💞",
-    "Tu hasta reh gya yaaro mein 😂💜🕴 Teri maa chudgyi baazaro mein 😂🌹",
-    "Teri Maa Chudwa denge re 🪖🔥⛏️🥴🤘🕴🧐💜😂😩💞",
-    "🧐 Gud ❤️ nyt 🧡 rndyk 💛 kal 🥩 Aaunga 💙 Teri 🖤 Maa 🧡 Chodne 🤍",
-    "🥶 Are 😱 Mc 😩 Ye 🤔 Kaise 🤘 Kiya 😏 Teri 😎 Maa 😬 Randi ♔ Hai 🤮 100% 😂",
-    "🧐🧐🤍🧡🖤❤️💚 Ye sare dill teri maa k naam beta 😂😜🔥",
-    "Hat peche hat tera baap aya 😂😂🥴😩🤬🏻💘🏻",
-    "Leave le rndyk psnd nai aya tu meko 🤢👊🏻",
-    "Teri maa chodu 💜 if yes then reply to my message 💖💖💖💘🏻🔥💜👆🏻🕴😂😂🕴🕴🕴",
-    "#REBEL 𝑹𝒂𝒂𝒏𝒅 𝐊ᴏ 𝐃ʟᴏ ᴍɪ 𝐏ᴏʀᴇ ʟᴜɴ?? 🥶🥵😂",
-    "😩 Tᴇʀɪ 🤘 Rᴀɴᴅ 🤢 Mᴏᴏ 🤐 Kᴇ 🤢 Bᴜʀ 🤣 Pᴇ 😤 Lᴏᴏʟ 🤔 Mᴏᴏ 😆 Kᴇ 😎 Tᴇʀɪ 😎 Bᴇʜᴇɴ 😂 Cʜᴜᴅ 😅 Dᴜɴɢᴇ 🤩",
-    "Gᴏᴏᴏ Ghar Ke Ladke Baap Log Ke Gc Mein Kya Krr Rha 🤢👞",
-    "🔮 𝐘ᴇ 𝐃ᴇᴋʜ ʟᴏɴ 𝐒ᴇ 𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐂ʜᴜᴅ 𝐃ɪʏᴏ 😂🪄😂🪄",
-    "Teri Maa Ko बाहुबली style mein chodunga 🥶🕴🤘😩",
-]
+def c_inline(text: str, data: bytes, color: str = "blue"):
+    """Creates a real Green, Red, or Blue inline callback button."""
+    c = color.lower()
+    style_val = BUTTON_STYLE_MAP.get(c, c)
+    for kw in ({"color": c}, {"style": style_val}, {"style": c}):
+        try:
+            return Button.inline(text, data, **kw)
+        except TypeError:
+            pass
+        try:
+            return types.KeyboardButtonCallback(text=text, data=data, **kw)
+        except TypeError:
+            pass
+    return Button.inline(text, data)
 
-AKSHU_MESSAGES = [
-    "𝑸𝑸𝑭 𝑸𝒐 𝑸𝒗𝒗𝒐 𝑸𝒂 𝑸𝒗𝒗𝒐",
-    "𝑸𝒗𝒐 𝑸𝒐 𝑸𝒂𝒏𝒂 𝑸𝒂𝒄𝒐 𝑸𝒏𝒂𝒏𝒏𝒂 𝑸𝒂𝒏𝒏𝒂 𝒏𝒂𝒏𝒂𝒏",
-    "𝑸𝒗𝒐 𝑸𝒏𝒂𝒏𝒂 𝑸𝒂𝒄𝒐 𝑸𝒂 𝑸𝒏𝒂𝒏𝒂 𝒏𝒂𝒏𝒂 𝑸𝒂𝒏𝒏𝒂 𝒏𝒂𝒏𝒏𝒂 ?",
-    "𝑸𝑸𝑭 𝑸𝒏𝒂𝒏𝒂 𝒏𝒂𝒏𝒂 𝒏𝒂𝒏𝒂𝒏𝒂 𝒏𝒂𝒏𝒂𝒏",
-    "𝑸𝒗𝒐 𝑸𝒂𝒏𝒂 𝒏𝒂𝒏𝒂𝒏𝒂 𝒏𝒂𝒏𝒏𝒂𝒏 𝑸𝒏𝒂𝒏𝒏𝒂 𝑸𝒂𝒏𝒂𝒏",
-    "𝑸𝑸𝑭", "𝒏𝒂𝒏𝒂", "𝑸𝒏𝒂𝒏𝒂 𝑸𝒂𝒂 𝒏𝒂𝒏 𝑸𝒗𝒐",
-    "𝑸𝒏𝒂𝒏𝒂",
-    "𝑸𝑸𝑭 𝑸𝒂𝒏𝒂 𝒏𝒂𝒏𝒏𝒂𝒏",
-    "𝑸𝒏𝒂𝒏𝒂 𝒏𝒂𝒏𝒂 𝒏𝒂𝒏",
-    "𝑸𝒏𝒂𝒏𝒂 𝒏𝒂𝒏𝒏𝒂 𝑸𝒂𝒏𝒏𝒂",
-    "𝑸𝒏𝒂𝒏𝒂 𝒏𝒂𝒏",
-    "𝑸𝒂𝒂𝒏",
-    "𝒏𝒂𝒏𝒏𝒂𝒏 𝑸𝒏𝒂",
-    "𝑸𝒏𝒂𝒏𝒏𝒂",
-    "𝑸𝒏𝒂𝒏𝒏𝒂",
-    "𝑸𝒏𝒂𝒏𝒏𝒂",
-    "𝑸𝒏𝒂𝒏𝒏𝒂",
-    "𝑸𝒏𝒂𝒏𝒏𝒂",
-    "𝑸𝒏𝒂𝒏𝒏𝒂",
-    "𝐓ʟᴏɪ 𝐑ᴇᴅᴅʏ ʟᴇ 𝐋ᴀᴜᴅᴇ 😂🖕🏻😂🖕🏻😂",
-    "𝐓ᴇʀɪ ᴍᴏᴏ ᴍᴏʀ ᴜʜ ᵁ😆😆😆",
-    "𝐀ᴏʀ ᴢᴏʀᴏʀ ᴍᴏᴏʀ ᴢᴏʀᴏʀ ʟᴇᴇ ʟᴏɴ ɴᴇ ᴋɪ ᴍᴏᴏʀ ᴛᴏ ʟᴇᴇ ʟᴏɴ ᴍᴏʀ ᴍᴏᴏ ʙᴀᴀᴘ ᴋᴏ ɢᴀʟɪ ᴅᴇ 😎🖕🏻😎🖕🏻😎",
-    "𝐓ᴇʀɪ 𝐌ᴏᴏ ʜᴏᴜʀ ʟᴇᴇ ʟᴏɴ ᴋʜᴀʏᴇ ʙᴇ 😡🤬😡🤬😡",
-    "𝐃ᴇᴋʜ ʟᴇᴇ ʟᴏɴ ᴛᴏ ʟᴏɴᴅᴇ ʟᴏɴᴇ ʟᴇɴ ! 🧐👨🏻‍🦰🧐",
-    "𝐓ᴇʀɪ 𝐌ᴏᴏ ᴋᴏ ʟᴏɴɢ ʀᴏɴɢ ʟᴇ ʟᴏɴ ʟᴇ ʟᴏɴɢ ʙᴀᴀᴘ ! 😆",
-    "𝐓ᴇʀɪ 𝐌ᴏᴏ ʜᴏᴜʀ ʟᴇ ʟᴏɴ ʟᴇ ʟᴏɴɢ ʟᴏɴᴇ ʟᴇɴ ! 😫",
-    "𝐓ᴇʀɪ ᴋʜᴏᴏɴ ʟᴇ ʟᴏᴏɴ ʟᴇ ʟᴏᴏɴ ʟᴇ ʟᴏᴏɴ ʟᴏɴ ᴋᴏ ʟᴏɴɢ ʟᴏɴ 😆",
-    "𝐓ᴇʀɪ ᴍᴏᴏ ʟᴏᴏɴ ʟᴇ ʟᴏᴏɴ ʟᴏɴ ʟᴏɴɢ ʟᴏɴ ! 😆",
-    "𝐓ᴇʀɪ ᴍᴏᴏ ʟᴇ ʟᴏɴɢ ʟᴇ ʟᴏɴɢ ʙᴀᴀᴘ ! 😆",
-    "𝐓ᴇʀɪ ʟᴏɴ ᴍᴏᴏ ʟᴇ ʟᴏɴɢ ʟᴏɴ ᴍᴏᴏ ʙᴀᴀᴘ ᴋᴏ ᴋʜᴀ ! 😆",
-    "𝐓ᴇʀɪ ʟᴏɴxᴇ ʟᴏᴏɴ ʟᴏɴɢ ʟᴏɴ ! 😆",
-    "𝐂ʜᴜᴘ ʟᴏɴ ~ Rᴇᴋᴇᴛ 🥀🌙 𝐌ɪ ʟᴏɴᴇɴ ʟᴏɴ ! 😫",
-]
+def c_url(text: str, url: str, color: str = "blue"):
+    """Creates a real Green, Red, or Blue inline URL button."""
+    c = color.lower()
+    style_val = BUTTON_STYLE_MAP.get(c, c)
+    for kw in ({"color": c}, {"style": style_val}, {"style": c}):
+        try:
+            return Button.url(text, url, **kw)
+        except TypeError:
+            pass
+        try:
+            return types.KeyboardButtonUrl(text=text, url=url, **kw)
+        except TypeError:
+            pass
+    return Button.url(text, url)
 
-RAID_MESSAGES = [
-    "तेरे मां के दूदू के बीच मेरा lund fas gaya oops 🤘（ Н̈.🍆 Н̈.）",
-    "𝐓ᴇɴ 𝐁ᴇʀ 𝐌ᴏ ( Н̈. ५ Н̈. )🥛 ʟᴏᴏᴋᴏ ",
-    "№☒︎ №𝐒ɪᴅᴇ 𝐃ᴏʟ 𝐆ᴜʟғ 𝐓ᴇɴ 𝐌ᴏ 𝐂ʜᴜᴅᴇ  मेरी रेलगाड़ी आ रही .-'🚂-'.꯱⊣𒓬______ №☒︎ №",
-    "⫶⯒ʚ.⫶🔯 𝐒ʜᴜ ᴜ𝐑𝐞 𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐈 𝐂ʜᴜᴅᴀɪ 𝐄ɴᴊᴏʏ 𝐊ᴏ 𝐑ᴏᴋᴏ 𝐓ᴇʀᴇ 𝐒ᴏᴍᴇ 𝐒ᴇ⫶⯒ʚ.⫶🔯",
-    "𝐓ᴇʀɪ 𝐌ᴏᴏ 𝐂ʜᴜᴅᴋᴇ 𝐋ᴇ 𝐘ᴏᴏ 😀",
-    "𝐑ᴜ 𝐌ᴏᴏ 𝐑ᴇᴅᴅʏ 𝐌ᴇ 𝐃ᴏʟᴇ 😃",
-    "𝐌ᴇʀᴇ 𝐒ᴇ 𝐌ᴏᴏ 𝐂ʜ𝐔𝐃ᴋᴇ 𝐋ᴇ 𝐒ʟᴜᴛ 𝐌ᴏᴏ 𝐌ᴇ !!",
-    "𝐘ᴏᴏ 𝐂ʜᴜᴅ 𝐑ᴇᴅᴅʏ 𝐌ᴇ 𝐃ᴏʟᴇ 😃",
-    "𝐓ᴇʀɪ 𝐃ʜᴇᴋ 𝐂ʜ𝐔𝐃 𝐌ᴏᴏ 𝐒ᴏᴏ 𝐊ʏᴀ?",
-    "⫶｡ﾟ☒︎｡𝐂𝐾𝑠ᴜ 𝐑ᴇ मदरचोद 𝐑ᴇᴋᴇᴛ बाप के सामने 𝐅𝐾ᴛʟᴇʀ 𝐀ᴜɴᴛʏ ⫶№ ⚼№ 😂🔥",
-    "नहीं नहीं तेरी मां को 𝐒ᴜᴋᴄᴅ 𝐑ᴇᴋᴇᴛ बाप चोद सकता है ॴॶॸ№ ⚌ ॴॶॸ😂ᐧᐸᐸ sᴖᴍᴠᴊᴇ ʀᴇɴᴅᴇʀ ???",
-]
+# ── TEXT LISTS ────────────────────────────────────────────────────────────────
+REBEL_MESSAGES = ["⋆｡ﾟ☁︎｡𝐂ʏᴜ 𝐑ᴇ मदरचोद 𝐑ᴇʙᴇʟ बाप के सामने 𝐅ʏᴛᴇʀ 𝐁ᴀɴᴇɢᴀ ⋆𓂃 ོ☼𓂃 😂🔥",
+        "नहीं नहीं तेरी मां को 𝐒ɪʀғ 𝐑ᴇʙᴇʟ बाप चोद सकता है ִֶָ𓂃 ࣪ ִֶָ👑་༘࿐ sᴀᴍᴊʜᴀ ʀᴀɴᴅɪᴋᴇ ???",
+        "तेरी मां का 𝐒ᴛʏʟɪsʜ भोसड़ा 😱",
+        "𝑻𝒆𝒓𝒚 𝒎𝒂𝒂 𝒓𝒂𝒏𝒅𝒂𝒍 𝒉 𝒃𝒂𝒔 𝒃𝒂𝒂𝒕 𝒌𝒉𝒂𝒕𝒂𝒎 😡🔥",
+        "सोच तेरी बहन को 𝐑ᴇʙᴇʟ बाप का गुलाम चोद रहा 😎🔥",
+        "Hello hello?? Oxygen aarahi है? रण्डी पुत्र 🧘🏻",
+        "Shut up रंडीके वरना दुनिया यही बोलेगी तेरी बहन 𝗥𝗲𝗯𝗲𝗹 /~👑 बाप से सही chudi 🥵🔥",
+        "ᴛᴜ ᴏʀ ᴛᴇʀɪ ᴍᴀᴀ ᴅᴏɴᴏ 𝗥𝗲𝗯𝗲𝗹 बाप के ʟɴᴅ sᴇ ᴋᴀʙʜɪ ᴜᴛʜ ɴʜɪ ᴘᴀʏᴇ 😂🔥",
+  " ོ༘₊⁺🇮🇳 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐈ɴᴅɪᴀ 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇮🇳 ₊⁺⋆.˚",
+        " ོ༘₊⁺🇯🇵 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐉ᴀᴘᴀɴ 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇯🇵 ₊⁺⋆.˚",
+        " ₊⁺🇺🇸 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐔𝐒𝐀 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇺🇸 ₊⁺⋆.˚",
+        " ོ༘₊⁺🇬🇧 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐔𝐊 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇬🇧 ₊⁺⋆.˚",
+        " ོ༘₊⁺🇰🇷 ₊⁺⋆.˚𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐊ᴏʀᴇᴀ 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇰🇷 ₊⁺⋆.˚",
+        " ོ༘₊⁺🇩🇪 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐆ᴇʀᴍᴀɴʏ 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇩🇪 ₊⁺⋆.˚",]
+        
+BANG_MESSAGES = ["𝐓ᴍᴋʙ 𝐑ɴᴅʏ ᴋᴇ 𝐋ᴀᴅᴋᴇ 😈🖕🏻😈🖕🏻😈",
+    "𝐓ᴇʀɪ ᴍᴀᴀ ᴍᴀʀ ɢʏɪ ¿😆😆😆",
+    "𝐀ᴀʀ ꜱᴀᴍᴀɴᴅᴀʀ ᴘᴀᴀʀ ꜱᴀᴍᴀɴᴅᴀʀ ʙᴇᴇᴄʜ ᴍᴇ ʜᴀɪ ɴᴀɪʏᴀ ᴘʜʟᴇ ᴛᴇʀɪ ʙʜᴇɴ चोदू ʙᴀᴀᴅ ᴍᴇ चोदू ᴍᴀɪʏᴀ ¡! 🥰🖕🏻🥰🖕🏻🥰🖕🏻",
+    "𝐓ᴇʀɪ 𝐌ᴀᴀ ʜᴜᴍᴇꜱʜᴀ ᴍᴜᴊʜꜱᴇ ʜɪ ᴋʏᴜ चुडती है ¡! 😡🤬😡🤬😡",
+    "𝐃ᴇᴋʜ ᴀᴀᴊ ᴛᴇʀɪ 𝐌ᴀᴀ ᴋᴀ ɴᴀɴɢᴀ ᴅᴀɴᴄᴇ ᴅɪᴋʜᴀᴜ ! 🩰🧑🏻‍🩰",
+    "𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ɪ 𝐆ᴜʟᴀʙɪ 𝐂ʜᴜᴛ ᴍᴇ 𝐌ᴜᴛ ᴋʀ ʙʜᴀɢ ᴊᴀᴜɢᴀ 𝐁ꜱᴅᴋ ! 😆",
+    "𝐓ᴇʀɪ 𝐌ᴀᴀ ᴄʜᴏᴅɴᴇ ᴀʀʜᴀ ʜᴜ ʀᴜᴋ ᴡʜɪ ɢᴜʟᴀᴍ ! 😾",
+    "𝐓ᴇʀɪ ʙʜᴇɴ ᴋᴇ ʙᴏᴏʙɪᴇꜱ ᴋᴇ ʙᴇᴇᴄʜ ᴍᴇ ʟɴᴅ ꜰᴀꜱᴀ ᴋʀ ᴍᴜᴛʜ ᴍᴀᴀʀ ᴅᴜɢᴀ ʙꜱᴅᴋ 😆",
+    "𝐓ᴇʀɪ ᴍᴀᴀ ᴋɪ ᴄʜᴜᴛ ᴍᴇ ᴍᴀɢɢɪᴇ ʙɴᴀ ᴋʀ ᴍᴜᴛʜ ʙʜᴀʀ ᴅᴜɢᴀ ! 😆",
+    "𝐓ᴇʀɪ ᴍᴀᴀ ʙʜᴛ ʀᴏᴛɪ ᴇʏ ʙɪʟᴋᴜʟ 𝐓ᴇʀɪ ᴛʀʜ ᴅᴏɴᴏ ʀɴᴅʏ ʀᴏɴᴀ ᴋʀᴛᴇ ʜᴏ ᴇᴡᴡ ! 😆",
+    "𝐓ᴇʀɪ ʙʜᴇɴ ᴋɪ ɢᴜʟᴀʙɪ ᴄʜxᴛ ᴋᴀᴀᴛ ᴅᴜɢᴀ ɢᴜʟᴀᴍ ! 😆",
+    "𝐂ʜʟ ɢᴜʟᴀᴍ ~ Rᴇʙᴇʟ 🥀🌙 𝐊ɪ ɢᴜʟᴀᴍɪ ᴋʀ ! 😾", "Chup rndyk kone mein baith 😂😂😂",
+"Teri Maa Ke भोसड़े में Theater Kholke सैयारा चाला दूंगा 🔈🔈🔥🔥🔥🔥😂😂😂🔈🔈🔈",
+"_✍🏻 𝐘ᴇ 𝐃ᴇᴋʜ ˢᶜʳⁱᵖᵗ ˡⁱᵏʰ ʳᵃʰᵃ ʰᵘ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐁ʜᴏsᴅᴇ 𝐌ᴇɪɴ 😂😂😂",
+"Sᴜᴀʀ Tᴇʀɪ Mᴀᴀ Kɪ Cʜᴜᴛ 😌😌💤💤",
+"𝐓ᴜ 𝐈ᴅ𝐑 𝐂ᴏᴍᴇʙᴀᴄ𝐊 𝐃ᴇᴛ𝐀 𝐑ᴇ𝐇 𝐆ʏ𝐀 𝐔ᴅʜ𝐑 𝐑𝐄𝐁𝐄𝐋 𝐓ᴇʀ𝐈 𝐌ᴀ𝐀 𝐂ʜᴏᴅ 𝐆ʏ𝐀 🩷🩶🩵",
+"Choding ho rhi hai teri maa ki 😬👨🏻‍💻🔥",
+"Teri Maa Ki Chut Mein Loda Daluga Beta 🥵💯",
+"🧐 Teri maa ka bh🤪sda dikh rha hai 😎",
+"😉🔥 Cya 😉🔥 re 😉 🔥 sapri 😉🔥 try 😉🔥 maa 😉🔥 tujh 😉🔥 nehlati 😉🔥 ny 😉🔥 ey 😉🔥 Cya 😉🔥",
+"Oye Madarchod Uth 😤😡🥵 Teri Maa Ka Choding Tem 😈👻🦶🏻",
+"Teri Maa Ko Football ⚽ bnake uske 𝗕𝗛😈𝗦𝗗𝗘 pe laat 🦶🏻 marunga 🤩🔥",
+"इस मंगलवार को ᴛᴇʀɪ ᴍᴀᴀ ᴋɪ ᴄʜᴜᴛ ᴋᴀ ʙʜᴀɴᴅᴀʀᴀ ʜᴏɢᴀ 😈😘👌🏻",
+"TᗴᖇI ᗰᗩᗩ Kᗩ ᗷOOᖇ ᗷᗴTᗩ 🤣🤮🔥😏🔥😂💞🌧️",
+"𝙈𝘼𝘼 𝙆𝙀 𝙇𝙊𝘿𝙀 🤮",
+"𝗣ᴇʜʟ𝗘 𝗧ᴇʀ𝗜 𝗕ᴇʜᴇ𝗡 𝗖ʜᴏᴅᴜɢ𝗔 𝗙ɪ𝗥 𝗧ᴇʀ𝗜 𝗠ᴀ𝗔 😆😂😆🔥🤢😂🤍😤",
+"ƇӇƲƤ ƬЄƦƖ Mƛƛ Ƙƛ ƁӇƠƧƊƛ ♻️",
+"𝘚𝘱𝘢𝘮𝘮𝘦𝘳 𝘣𝘢𝘯𝘦𝘨𝘢 𝘳𝘢𝘯𝘥𝘪𝘬𝘦 🤢🔥",
+"𝐀ᴊ𝐀 𝐌ᴄ 𝐁ᴀɴᴀ𝐔 𝐓ᴜᴊʜ𝐄 𝐒ᴘᴀᴍᴍᴇ𝐑 👻💥🤍😹👑",
+"𝘣𝘰𝘭 Rᴇʙᴇʟ 𝘉𝘢𝘢𝘱 👑",
+"😍 Teri 😡 Randi 🤪 Maa 😤 Ko 😎 Pel 😭 Dunga 😍",
+"Idhar Aa Beta 🤪💔 Teri Maa Chodu 😂😘",
+"Oye bihari kaam pe ja 🔥⛏️🔥⛏️⛏️🔥⛏️💞💞🔥💞⛏️🔥💞⛏️⛏️",
+"Teri Maa Chodne K liye Pura Gc Khada Hai 🥴😁🩷💯",
+"Teri Maa Bio Mein #Proudrandi 💔🥀 likhti hai 🤩🔥🩷",
+"Rndyk lund se utr 😩👏🏻",
+"Arey Yarr Apni Maa Matt Nangi Kar 😩🔥💞😩⛏️🔥🥀🤩💞😩🔥😩🩷💞",
+"Tu hasta reh gya yaaro mein 😁💯💔 Teri maa chudgyi baazaro mein 😂🌹",
+"Teri Maa Chudwa denge re 🪖🔥⛏️🥴🤪💔🩷💯😁😩💞",
+"🩷 Gud ❤️ nyt 🧡 rndyk 💛 kal 🩵 Aaunga 💙 Teri 🖤 Maa 🩶 Chodne 🤍",
+"🥶 Are 😱 Mc 😩 Ye 🤔 Kaise 🤪 Kiya 😏 Teri 😎 Maa 😬 Randi 🙄 Hai 🤮 100% 😂",
+"🩷🩵🤍🩶🖤❤️💚 Ye sare dill teri maa k naam beta 😂😜🔥",
+"Hat peche hat tera baap aya 😂😂🥴😹🤲🏻💪🏻",
+"Leave le rndyk psnd nai aya tu meko 🤢👎🏻",
+"Teri maa chodu 💯 if yes then reply to my message 💀💀💀💪🏻🔥💯👆🏻💔😂😂💔💔💔",
+"#REBEL 𝘉𝘢𝘢𝘱 𝐊ᴏ 𝐃ʙᴀ ɴʜɪ 𝐏ᴀʀᴇ ᴄʏᴀ?? 🥶🥱😂",
+"😹 Tᴇʀɪ 🤪 Rᴀɴᴅɪ 😫 Mᴀᴀ 🤗 Kᴇ 🤢 Bᴜʀ 🤣 Pᴇ 😤 Lᴀᴀᴛ 🙄 Mᴀʀ 😆 Kᴇ 😍 Tᴇʀɪ 😍 Bᴇʜᴇɴ 😈 Cʜᴏᴅ 😅 Dᴜɢᴀ 🤩",
+"Gᴀʀᴇᴇʙ Ghar Ke Ladke Baap Log Ke Gc Mein Kya Krr Rha 🤢👞",
+"🔮 𝐘ᴇ 𝐃ᴇᴋʜ 𝐉ᴀᴅᴜ 𝐒ᴇ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐂ʜᴏᴅ 𝐃ɪyᴀ 😂🪄😂🪄", "Teri Maa Ko बाहुबली style mein chodunga 🥶💔🤪😹",]
 
-# ── MENU TEXTS (STYLIZED) ──────────────────────────────────────────────────────
+AKSHU_MESSAGES = ["𝙏𝙈𝙆𝘾 𝙈𝙀 𝙆𝙐𝙏𝙏𝙀 𝙆𝘼 𝙇𝙉𝘿",
+    "𝙊𝙔𝙀 𝙏𝙐 𝙈𝘼𝙍𝘼 𝙆𝘼𝙄𝙎𝙀 𝙂𝘼𝙍𝙀𝙀𝘽 𝘾𝙑𝙍 𝙆𝙍",
+    "𝙊𝙔𝙀 𝙏𝙀𝙍𝙄 𝙈𝘼𝙐𝙎𝙄 𝙆𝙄 𝘾𝙃𝙐𝙏 𝙈𝘼𝘼𝙍 𝘿𝙐 𝙍𝙊𝙔𝙀𝙂𝘼 𝙏𝙊 𝙉𝘼‌𝙄 ?",
+    "𝙏𝙈𝙆𝘾 𝙍𝙉𝘿𝙔 𝙆𝙀 𝙂𝙐𝙇𝘼𝙈𝙄 𝙆𝙍 𝘾𝙃𝙐𝙋 𝘾𝙃𝘼𝙋",
+    "𝙊𝙔𝙀 𝘽𝙎𝘿𝙆 𝙃𝘼𝙒𝘼𝘽𝘼𝘼𝙕 𝙏𝘼𝙏𝙏𝙀 𝘽𝙃𝘼𝙂 𝙈𝙏",
+    "𝙏𝙈𝙆𝙁𝘽", "𝙍𝙉𝘿𝙔", "𝙏𝙀𝙍𝙄 𝙈𝘼𝘼 𝙈𝘼𝙍 𝙂𝙔𝙄", "𝙏𝘽𝙆𝘾",
+    "𝙏𝙈𝙆𝘾 𝙈𝙄𝙀 𝙈𝘼𝙂𝙂𝙄𝙀", "𝙏𝘽𝙆𝘽 𝙈𝙄𝙀 𝙇𝙉𝘿", "𝙏𝙀𝙍𝙄 𝙂𝙉𝘿 𝙈𝙄𝙀 𝙆𝙐𝙏𝙏𝘼",
+    "𝙂𝙐𝙇𝘼‌𝙈𝙄 𝙆𝙍", "𝙆𝙀𝙀𝘿𝙀", "𝘼𝙐𝙆𝘼𝘼𝙏 𝘽𝙉𝘼", "𝙂𝘼𝙍𝙀𝙀𝘽", "𝘽𝙎𝘿𝙆",
+    "𝘾𝙃𝙈𝙍",
+    "𝐓ᴍᴋʙ 𝐑ɴᴅʏ ᴋᴇ 𝐋ᴀᴅᴋᴇ 😈🖕🏻😈🖕🏻😈",
+    "𝐓ᴇʀɪ ᴍᴀᴀ ᴍᴀʀ ɢʏɪ ¿😆😆😆",
+    "𝐀ᴀʀ ꜱᴀᴍᴀɴᴅᴀʀ ᴘᴀᴀʀ ꜱᴀᴍᴀɴᴅᴀʀ ʙᴇᴇᴄʜ ᴍɪᴇ ʜᴀɪ ɴᴀɪʏᴀ ᴘʜʟᴇ ᴛᴇʀɪ ʙʜᴇɴ चोदू ʙᴀᴀᴅ ᴍɪᴇ चोदू ᴍᴀɪʏᴀ ¡! 🥰🖕🏻🥰🖕🏻🥰🖕🏻",
+    "𝐓ᴇʀɪ 𝐌ᴀᴀ ʜᴜᴍᴇꜱʜᴀ ᴍᴜᴊʜꜱᴇ ʜɪ ᴋʏᴜ चुडती है ¡! 😡🤬😡🤬😡",
+    "𝐃ᴇᴋʜ ᴀᴀᴊ ᴛᴇʀɪ 𝐌ᴀᴀ ᴋᴀ ɴᴀɴɢᴀ ᴅᴀɴᴄᴇ ᴅɪᴋʜᴀᴜ ! 🩰🧑🏻‍🩰",
+    "𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ɪ 𝐆ᴜʟᴀʙɪ 𝐂ʜᴜᴛ ᴍɪᴇ 𝐌ᴜᴛ ᴋʀ ʙʜᴀɢ ᴊᴀᴜɢᴀ 𝐁ꜱᴅᴋ ! 😆",
+    "𝐓ᴇʀɪ 𝐌ᴀᴀ ᴄʜᴏᴅɴᴇ ᴀʀʜᴀ ʜᴜ ʀᴜᴋ ᴡʜɪ ɢᴜʟᴀᴍ ! 😾",
+    "𝐓ᴇʀɪ ʙʜᴇɴ ᴋᴇ ʙᴏᴏʙɪᴇꜱ ᴋᴇ ʙᴇᴇᴄʜ ᴍɪᴇ ʟɴᴅ ꜰᴀꜱᴀ ᴋʀ ᴍᴜᴛʜ ᴍᴀᴀʀ ᴅᴜɢᴀ ʙꜱᴅᴋ 😆",
+    "𝐓ᴇʀɪ ᴍᴀᴀ ᴋɪ ᴄʜᴜᴛ ᴍɪᴇ ᴍᴀɢɢɪᴇ ʙɴᴀ ᴋʀ ᴍᴜᴛʜ ʙʜᴀʀ ᴅᴜɢᴀ ! 😆",
+    "𝐓ᴇʀɪ ᴍᴀᴀ ʙʜᴛ ʀᴏᴛɪ ᴇʏ ʙɪʟᴋᴜʟ 𝐓ᴇʀɪ ᴛʀʜ ᴅᴏɴᴏ ʀɴᴅʏ ʀᴏɴᴀ ᴋʀᴛᴇ ʜᴏ ᴇᴡᴡ ! 😆",
+    "𝐓ᴇʀɪ ʙʜᴇɴ ᴋɪ ɢᴜʟᴀʙɪ ᴄʜxᴛ ᴋᴀᴀᴛ ᴅᴜɢᴀ ɢᴜʟᴀᴍ ! 😆",
+    "𝐂ʜʟ ɢᴜʟᴀᴍ ~ Rᴇʙᴇʟ 🥀🌙 𝐊ɪ ɢᴜʟᴀᴍɪ ᴋʀ ! 😾"]
+    
+RAID_MESSAGES = ["तेरे मां के दूदू के बीच मेरा lund fas gaya oops 🤪（ ͜.🍆 ͜.）",
+        "𝐓ᴇʀʏ 𝐁ʜᴇ𝐍 𝐊ᴇ ( ͜. ㅅ ͜. )🥛 ʏᴜᴍᴍʏ ",
+        "𓂃☁︎ 𓂃𝐒ɪᴅᴇ 𝐇ᴀᴛ 𝐆ᴜʟᴀᴍ 𝐓ᴇʀʏ 𝐌ᴀᴀ 𝐊ᴏ 𝐂ʜᴏᴅɴᴇ  मेरी रेलगाड़ी आ रही .-'🚂-'.ᯓᡣ𐭩______ 𓂃☁︎ 𓂃",
+        "⋆⭒˚.⋆🔭 𝐒ʜᴜᴛ 𝐔ᴘ 𝐑ᴀɴᴅɪᴋᴇ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ɪ 𝐂ʜᴜᴅᴀɪ 𝐄ɴᴊᴏʏ 𝐊ʀ 𝐑ᴀʜᴀ 𝐓ᴇʟᴇ𝐒ᴄᴏᴘᴇ 𝐒ᴇ⋆⭒˚.⋆🔭",
+    "𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐂ʜᴜᴅᴡᴀ 𝐋ᴇ 𝐘ᴀʜᴀ 😀", "𝐑ʀ 𝐊ᴀʀ 𝐑ᴀɴᴅɪ 𝐊ᴇ 𝐁ᴀᴄʜᴇ 😃", "𝐌ᴇʀᴇ 𝐒ᴇ 𝐌ᴀᴀ 𝐂ʜ𝐮ᴅᴡᴀ 𝐋ᴇ 𝐒ʟɪᴅᴇ 𝐊ᴀʀ 𝐊ᴇ !!", "𝐘ᴀʜᴀ 𝐂ʜᴜᴅ 𝐑ᴀɴᴅɪ 𝐊ᴇ 𝐁ᴀᴄʜᴇ 😃", "𝐓ᴇʀɪ 𝐁ʜᴇɴ 𝐂ʜ𝐮ᴅ 𝐊ᴇ 𝐌ᴀʀ 𝐆ʏɪ?", "⋆｡ﾟ☁︎｡𝐂ʏᴜ 𝐑ᴇ मदरचोद 𝐑ᴇʙᴇʟ बाप के सामने 𝐅ʏᴛᴇʀ 𝐁ᴀɴᴇɢᴀ ⋆𓂃 ོ☼𓂃 😂🔥",
+        "नहीं नहीं तेरी मां को 𝐒ɪʀғ 𝐑ᴇʙᴇʟ बाप चोद सकता है ִֶָ𓂃 ࣪ ִֶָ👑་༘࿐ sᴀᴍᴊʜᴀ ʀᴀɴᴅɪᴋᴇ ???",]
+
+# ── MENU TEXTS (ATTRACTIVE CYBER DESIGN) ──────────────────────────────────────
 MENU_MAIN = """
-╔═════════════════════════════╗
-║  ☠️ 𝐑𝐄𝐊𝐄𝐓 𝐔𝐒𝐄𝐑𝐁𝐎𝐓 𝐕𝐈𝐏 ☠️  ║
-╚═════════════════════════════╝
+╔═══════════════════════════╗
+   ☠️ 𝐑𝐄𝐁𝐄𝐋 𝐔𝐒𝐄𝐑𝐁𝐎𝐓 𝐕𝟐 ☠️
+╚═══════════════════════════╝
 
-╭━━━〘 📂 **𝐂𝐎𝐌𝐌𝐀𝐍𝐃 𝐌𝐄𝐍𝐔𝐒** 〙━━━╮
-┃
-┃ ⚔️ `.menu1` ━⫸ **𝐑ᴇʙᴇʟ & 𝐑ᴀɪᴅ 𝐒ᴜɪᴛᴇ**
-┃ ☣️ `.menu2` ━⫸ **𝐌ᴇᴅɪᴀ & 𝐂ʜᴀᴛ 𝐂ᴏɴᴛʀᴏʟ**
-┃ ✨ `.menu3` ━⫸ **𝐅ɪɢʜᴛᴇʀ & 𝐂ʟᴏɴᴇ 𝐓ᴏᴏʟꜱ**
-┃ 🛡️ `.menu4` ━⫸ **𝐀ᴜᴛʜᴏʀɪᴛʏ & 𝐒ᴇᴄᴜʀɪᴛʏ**
-┃
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
-╭─────────────────────────────╮
-│  ⚡ **𝐏ᴏᴡᴇʀᴇᴅ 𝐁ʏ 𝐑ᴇʙᴇʟ 𝐂ᴏʀᴇ** 🧿  │
-╰─────────────────────────────╯
+🌌 **𝐂𝐎𝐌𝐌𝐀𝐍𝐃 𝐂𝐄𝐍𝐓𝐄𝐑**
+╭───────────────────────────╮
+┃ 🔴 `.menu1` ➔ **𝐑ᴀɪᴅ & 𝐒ᴘᴀᴍ 𝐄ɴɢɪɴᴇ**
+┃ 🔵 `.menu2` ➔ **𝐌ᴇᴅɪᴀ & 𝐂ʜᴀᴛ 𝐆ᴜᴀʀᴅ**
+┃ 🟢 `.menu3` ➔ **𝐁ᴏᴛ 𝐁ʀɪɢᴀᴅᴇ & 𝐁ᴀᴋᴄʜᴏᴅɪ**
+┃ 👑 `.menu4` ➔ **𝐀ᴜᴛʜᴏʀɪᴛʏ & 𝐏ʀᴏᴛᴇᴄᴛɪᴏɴ**
+╰───────────────────────────╯
+
+╭───────────────────────────╮
+┃ ⚡ **𝐒ᴛᴀᴛᴜꜱ:** `𝐎ɴʟɪɴᴇ & 𝐑ᴇᴀᴅʏ`
+┃ 🩷 **𝐌ᴀᴅᴇ ʙʏ:** **𝐑ᴇʙᴇʟ 𝐊ᴇɴɢ** ⚡
+╰───────────────────────────╯
 """.strip()
 
 MENU_1 = """
-╔═════════════════════════════╗
-║   ⚔️ 𝐑𝐄𝐁𝐄𝐋 & 𝐑𝐀𝐈𝐃 𝐒𝐔𝐈𝐓𝐄 ⚔️   ║
-╚═════════════════════════════╝
+╔═══════════════════════════╗
+   🔴 𝐑𝐀𝐈𝐃 & 𝐒𝐏𝐀𝐌 𝐒𝐘𝐒𝐓𝐄𝐌 🔴
+╚═══════════════════════════╝
 
-╭━━━〘 🔥 **𝐒𝐏𝐀𝐌 𝐋𝐎𝐎𝐏𝐒** 〙━━━╮
-┃ ├─ ⚔️ `.rebel` ➔ **𝐒ᴛᴀʀᴛ 𝐑ᴇᴋᴇᴛ 𝐋ᴏᴏᴘ**
-┃ ├─ 🛑 `.rebelstop` ➔ **𝐒ᴛᴏᴘ 𝐑ᴇᴋᴇᴛ 𝐋ᴏᴏᴘ**
-┃ ├─ 💀 `.bang` ➔ **𝐓ᴜʀʙᴏ 𝐁ᴀɴɢ (0.5s)**
-┃ ├─ ✋ `.bangstop` ➔ **𝐒ᴛᴏᴘ 𝐁ᴀɴɢ 𝐋ᴏᴏᴘ**
-┃ ├─ 😂 `.akshu` ➔ **𝐒ᴛᴀʀᴛ 𝐀ᴋꜱʜᴜ 𝐋ᴏᴏᴘ**
-┃ ╰─ 🚫 `.akshustop` ➔ **𝐒ᴛᴏᴘ 𝐀ᴋꜱʜᴜ 𝐋ᴏᴏᴘ**
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+⚡ **𝐋𝐎𝐎𝐏 𝐀𝐓𝐓𝐀𝐂𝐊𝐒**
+╭───────────────────────────╮
+┃ ⚔️ `.rebel`     ➔ 𝐑ᴇʙᴇʟ 𝐋ᴏᴏᴘ
+┃ 🛑 `.rebelstop` ➔ 𝐒ᴛᴏᴘ 𝐑ᴇʙᴇʟ
+┃ 💀 `.bang`      ➔ 𝐁ᴀɴɢ 𝐋ᴏᴏᴘ (0.5ˢ)
+┃ ❌ `.bangstop`  ➔ 𝐒ᴛᴏᴘ 𝐁ᴀɴɢ
+┃ 😈 `.akshu`     ➔ 𝐀ᴋꜱʜᴜ 𝐋ᴏᴏᴘ
+┃ 🚫 `.akshustop` ➔ 𝐒ᴛᴏᴘ 𝐀ᴋꜱʜᴜ
+╰───────────────────────────╯
 
-╭━━━〘 🎯 **𝐓𝐀𝐑𝐆𝐄𝐓 & 𝐑𝐀𝐈𝐃** 〙━━━╮
-┃ ├─ 🌸 `.reply` ➔ **𝐀ᴜᴛᴏ-𝐑ᴇᴘʟʏ 𝐓ᴀʀɢᴇᴛ**
-┃ ├─ ⏹️ `.sreply` ➔ **𝐂ʟᴇᴀʀ 𝐀ᴜᴛᴏ-𝐑ᴇᴘʟʏ**
-┃ ├─ 🎯 `.raid` ➔ **𝐋ᴏᴄᴋ 𝐓ᴀʀɢᴇᴛ 𝐑ᴀɪᴅ**
-┃ ├─ 🚫 `.raidstop` ➔ **𝐃ɪꜱᴀʙʟᴇ 𝐓ᴀʀɢᴇᴛ 𝐑ᴀɪᴅ**
-┃ ╰─ 💥 `.stop` ➔ **𝐊ɪʟʟ 𝐀ʟʟ 𝐀ᴄᴛɪᴠᴇ 𝐋ᴏᴏᴘꜱ**
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+🎯 **𝐓𝐀𝐑𝐆𝐄𝐓 𝐑𝐀𝐈𝐃 & 𝐑𝐄𝐏𝐋𝐘**
+╭───────────────────────────╮
+┃ 🌸 `.reply`     ➔ 𝐂ᴏɴᴛɪɴᴜᴏᴜꜱ 𝐑ᴇᴘʟʏ 🖤
+┃ ⏹️ `.sreply`    ➔ 𝐒ᴛᴏᴘ 𝐂ᴏɴᴛɪɴᴜᴏᴜꜱ 𝐑ᴇᴘʟʏ
+┃ 🎯 `.raid`      ➔ 𝐓ᴀʀɢᴇᴛ 𝐀ᴜᴛᴏ-𝐑ᴇᴘʟʏ 𝐑ᴀɪᴅ
+┃ 🚫 `.raidstop`  ➔ 𝐒ᴛᴏᴘ 𝐓ᴀʀɢᴇᴛ 𝐑ᴀɪᴅ
+┃ 🍂 `.stop`      ➔ **𝐊ɪʟʟ 𝐀ʟʟ 𝐋ᴏᴏᴘꜱ & 𝐑ᴀɪᴅꜱ** 💥
+╰───────────────────────────╯
 """.strip()
 
 MENU_2 = """
-╔═════════════════════════════╗
-║  ☣️ 𝐌𝐄𝐃𝐈𝐀 & 𝐂𝐇𝐀𝐓 𝐂𝐎𝐍𝐓𝐑𝐎𝐋 ☣️  ║
-╚═════════════════════════════╝
+╔═══════════════════════════╗
+   🔵 𝐌𝐄𝐃𝐈𝐀 & 𝐂𝐇𝐀𝐓 𝐂𝐎𝐍𝐓𝐑𝐎𝐋 🔵
+╚═══════════════════════════╝
 
-╭━━━〘 🎵 **𝐌𝐔𝐒𝐈𝐂 𝐄𝐍𝐆𝐈𝐍𝐄** 〙━━━╮
-┃ ╰─ 🎶 `.song` ➔ **𝐃ᴏᴡɴʟᴏᴀᴅ 𝐌𝐏3 𝐀ᴜᴅɪᴏ**
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+🎵 **𝐌𝐄𝐃𝐈𝐀 & 𝐒𝐎𝐔𝐍𝐃**
+╭───────────────────────────╮
+┃ 🎶 `.song` ➔ 𝐒ᴇᴀʀᴄʜ & 𝐃ᴏᴡɴʟᴏᴀᴅ 𝐌ᴜꜱɪᴄ
+╰───────────────────────────╯
 
-╭━━━〘 ☣️ **𝐂𝐇𝐀𝐓 𝐄𝐍𝐅𝐎𝐑𝐂𝐄𝐑** 〙━━━╮
-┃ ├─ 🗑️ `.purge` ➔ **𝐅ᴀꜱᴛ 𝐏ᴜʀɢᴇ 𝐌ᴇꜱꜱᴀɢᴇꜱ**
-┃ ├─ 🤫 `.mute` ➔ **𝐒ɪʟᴇɴᴄᴇ 𝐓ᴀʀɢᴇᴛ 𝐔ꜱᴇʀ**
-┃ ├─ 🔊 `.unmute` ➔ **𝐔ɴᴍᴜᴛᴇ 𝐓ᴀʀɢᴇᴛ 𝐔ꜱᴇʀ**
-┃ ├─ 🚷 `.lock` ➔ **𝐋ᴏᴄᴋᴅᴏᴡɴ 𝐄ɴᴛɪʀᴇ 𝐂ʜᴀᴛ**
-┃ ╰─ ✅ `.unlock` ➔ **𝐃ɪꜱᴀʙʟᴇ 𝐂ʜᴀᴛ 𝐋ᴏᴄᴋ**
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+☣️ **𝐂𝐇𝐀𝐓 𝐂𝐎𝐍𝐓𝐑𝐎𝐋**
+╭───────────────────────────╮
+┃ 🗑️ `.purge`    ➔ 𝐏ᴜʀɢᴇ 𝐂ʜᴀᴛ 𝐌ᴇꜱꜱᴀɢᴇꜱ 💨
+┃ 🤫 `.mute`     ➔ 𝐒ɪʟᴇɴᴄᴇ 𝐒ᴘᴇᴄɪꜰɪᴄ 𝐔ꜱᴇʀ
+┃ 🔊 `.unmute`   ➔ 𝐔ɴᴍᴜᴛᴇ 𝐒ᴘᴇᴄɪꜰɪᴄ 𝐔ꜱᴇʀ
+┃ 🚷 `.lock`     ➔ 𝐌ᴜᴛᴇ 𝐀ʟʟ 𝐍ᴇᴡ 𝐌ᴇꜱꜱᴀɢᴇꜱ
+┃ ✅ `.unlock`   ➔ 𝐄ɴᴅ 𝐋ᴏᴄᴋ 𝐌ᴏᴅᴇ ⚡
+╰───────────────────────────╯
 
-╭━━━〘 💫 **𝐀𝐔𝐓𝐎 𝐑𝐄𝐀𝐂𝐓𝐈𝐎𝐍𝐒** 〙━━━╮
-┃ ├─ ✨ `.react` ➔ **𝐑ᴇᴀᴄᴛ 𝐓ᴏ 𝐔ꜱᴇʀ**
-┃ ├─ 🌟 `.reactall` ➔ **𝐑ᴇᴀᴄᴛ 𝐓ᴏ 𝐄ᴠᴇʀʏᴏɴᴇ**
-┃ ├─ 🛑 `.sr` ➔ **𝐒ᴛᴏᴘ 𝐔ꜱᴇʀ 𝐑ᴇᴀᴄᴛ**
-┃ ╰─ 🧹 `.srall` ➔ **𝐂ʟᴇᴀʀ 𝐀ʟʟ 𝐑ᴇᴀᴄᴛꜱ**
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+✨ **𝐀𝐔𝐓𝐎 𝐑𝐄𝐀𝐂𝐓𝐈𝐎𝐍𝐒**
+╭───────────────────────────╮
+┃ 💫 `.react` / `.reactall` ➔ 𝐓ᴏɢɢʟᴇ 𝐀ᴜᴛᴏ 𝐑ᴇᴀᴄᴛ
+┃ 🛑 `.sr` / `.srall`       ➔ 𝐒ᴛᴏᴘ 𝐀ᴜᴛᴏ 𝐑ᴇᴀᴄᴛ
+╰───────────────────────────╯
 """.strip()
 
 MENU_3 = """
-╔═════════════════════════════╗
-║  ✨ 𝐅𝐈𝐆𝐇𝐓𝐄𝐑 & 𝐂𝐋𝐎𝐍𝐄 𝐓𝐎𝐎𝐋𝐒 ✨  ║
-╚═════════════════════════════╝
+╔═══════════════════════════╗
+   🟢 𝐁𝐑𝐈𝐆𝐀𝐃𝐄 & 𝐁𝐀𝐊𝐂𝐇𝐎𝐃𝐈 🟢
+╚═══════════════════════════╝
 
-╭━━━〘 🤖 **𝐆𝐑𝐎𝐔𝐏 𝐅𝐈𝐆𝐇𝐓𝐄𝐑** 〙━━━╮
-┃ ├─ 👑 `.admin` ➔ **𝐏ʀᴏᴍᴏᴛᴇ 𝐅ᴜʟʟ 𝐀ᴅᴍɪɴ**
-┃ ├─ 🚫 `.take` ➔ **𝐃ᴇᴍᴏᴛᴇ 𝐀ᴅᴍɪɴ 𝐑ɪɢʜᴛꜱ**
-┃ ├─ 👢 `.kick` ➔ **𝐊ɪᴄᴋ 𝐓ᴀʀɢᴇᴛ 𝐅ʀᴏᴍ 𝐂ʜᴀᴛ**
-┃ ├─ 📲 `.join` ➔ **𝐉ᴏɪɴ 𝐂ʜᴀᴛ 𝐕ɪᴀ 𝐋ɪɴᴋ**
-┃ ├─ 🦫 `.bot` ➔ **𝐒ᴜᴍᴍᴏɴ 𝐌ᴇɴᴛɪᴏɴ 𝐁ᴏᴛꜱ**
-┃ ╰─ 🥾 `.kickbot` ➔ **𝐏ᴜʀɢᴇ 𝐌ᴇɴᴛɪᴏɴ 𝐁ᴏᴛꜱ**
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+🤖 **𝐁𝐎𝐓 𝐁𝐑𝐈𝐆𝐀𝐃𝐄**
+╭───────────────────────────╮
+┃ 👑 `.admin`   ➔ 𝐆ʀᴀɴᴛ 𝐅ᴜʟʟ 𝐀ᴅᴍɪɴ 𝐑ɪɢʜᴛꜱ
+┃ 🚫 `.take`    ➔ 𝐒ᴛʀɪᴘ 𝐀ᴅᴍɪɴ 𝐏ᴇʀᴍɪꜱꜱɪᴏɴꜱ
+┃ 👢 `.kick`    ➔ 𝐊ɪᴄᴋ 𝐔ꜱᴇʀ 𝐅ʀᴏᴍ 𝐂ʜᴀᴛ
+┃ 🔗 `.join`    ➔ 𝐉ᴏɪɴ 𝐆𝐂 / 𝐂ʜᴀɴɴᴇʟ 𝐕ɪᴀ 𝐋ɪɴᴋ
+┃ 🦾 `.bot`     ➔ 𝐒ᴜᴍᴍᴏɴ 𝐊ᴇɴɢ 𝐁ᴏᴛꜱ ⚡
+┃ 🥾 `.kickbot` ➔ 𝐄xᴘᴇʟ 𝐊ᴇɴɢ 𝐁ᴏᴛꜱ
+╰───────────────────────────╯
 
-╭━━━〘 🎭 **𝐈𝐃𝐄𝐍𝐓𝐈𝐓𝐘 & 𝐂𝐎𝐑𝐄** 〙━━━╮
-┃ ├─ 🔮 `.copy` ➔ **𝐂ʟᴏɴᴇ 𝐓ᴀʀɢᴇᴛ 𝐏ʀᴏꜰɪʟᴇ**
-┃ ├─ 🌝 `.back` ➔ **𝐑ᴇꜱᴛᴏʀᴇ 𝐎ʀɪɢɪɴᴀʟ 𝐈ᴅ**
-┃ ├─ 🚀 `.ping` ➔ **𝐂ʜᴇᴄᴋ 𝐒ᴇʀᴠᴇʀ 𝐋ᴀᴛᴇɴᴄʏ**
-┃ ╰─ 🔄 `.refresh` ➔ **𝐅ʟᴜꜱʜ 𝐀ʟʟ 𝐌ᴇᴍᴏʀʏ 𝐋ɪꜱᴛꜱ**
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+✨ **𝐁𝐀𝐊𝐂𝐇𝐎𝐃𝐈 & 𝐓𝐎𝐎𝐋𝐒**
+╭───────────────────────────╮
+┃ 🔮 `.copy`    ➔ 𝐂ʟᴏɴᴇ 𝐒ᴏᴍᴇᴏɴᴇ'ꜱ 𝐏ʀᴏꜰɪʟᴇ 🪄
+┃ 🌿 `.back`    ➔ 𝐑ᴇꜱᴛᴏʀᴇ 𝐎ʀɪɢɪɴᴀʟ 𝐏ʀᴏꜰɪʟᴇ 🔁
+┃ 🚀 `.ping`    ➔ 𝐂ʜᴇᴄᴋ 𝐂ᴜʀʀᴇɴᴛ 𝐋ᴀᴛᴇɴᴄʏ ⚡
+┃ 🔄 `.refresh` ➔ 𝐂ʟᴇᴀʀ 𝐀ᴜᴛʜ & 𝐌ᴜᴛᴇ 𝐋ɪꜱᴛꜱ
+╰───────────────────────────╯
 """.strip()
 
 MENU_4 = """
-╔═════════════════════════════╗
-║  🛡️ 𝐀𝐔𝐓𝐇𝐎𝐑𝐈𝐓𝐘 & 𝐒𝐄𝐂𝐔𝐑𝐈𝐓𝐘 🛡️  ║
-╚═════════════════════════════╝
+╔═══════════════════════════╗
+   👑 𝐀𝐔𝐓𝐇𝐎𝐑𝐈𝐓𝐘 & 𝐒𝐇𝐈𝐄𝐋𝐃 👑
+╚═══════════════════════════╝
 
-╭━━━〘 👑 **𝐒𝐔𝐃𝐎 𝐂𝐎𝐍𝐓𝐑𝐎𝐋** 〙━━━╮
-┃ ├─ 👑 `.sudolist` ➔ **𝐕ɪᴇᴡ 𝐒ᴜᴅᴏ 𝐀ᴅᴍɪɴꜱ**
-┃ ├─ 🤍 `.sudo` ➔ **𝐆ʀᴀɴᴛ 𝐒ᴜᴅᴏ 𝐀ᴄᴄᴇꜱꜱ**
-┃ ╰─ 🖤 `.delsudo` ➔ **𝐑ᴇᴠᴏᴋᴇ 𝐒ᴜᴅᴏ 𝐀ᴄᴄᴇꜱꜱ**
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+👑 **𝐀𝐔𝐓𝐇𝐎𝐑𝐈𝐓𝐘**
+╭───────────────────────────╮
+┃ 👑 `.sudolist` ➔ 𝐒ʜᴏᴡ 𝐀ʟʟ 𝐁ᴏᴛ 𝐀ᴜᴛʜᴏʀɪᴛɪᴇꜱ
+┃ 🤍 `.sudo`     ➔ 𝐀ᴜᴛʜᴏʀɪꜱᴇ 𝐍ᴇᴡ 𝐔ꜱᴇʀ 😇
+┃ 🖤 `.delsudo`  ➔ 𝐑ᴇᴍᴏᴠᴇ 𝐅ʀᴏᴍ 𝐀ᴜᴛʜ 𝐋ɪꜱᴛ 🖕🏻
+╰───────────────────────────╯
 
-╭━━━〘 🧿 **𝐈𝐌𝐌𝐔𝐍𝐈𝐓𝐘 𝐒𝐇𝐈𝐄𝐋𝐃** 〙━━━╮
-┃ ├─ 🛡️ `.safe` ➔ **𝐖ʜɪᴛᴇʟɪꜱᴛ 𝐓ᴀʀɢᴇᴛ 𝐔ꜱᴇʀ**
-┃ ╰─ 🌸 `.unsafe` ➔ **𝐑ᴇᴍᴏᴠᴇ 𝐔ꜱᴇʀ 𝐒ʜɪᴇ𝐋𝐃**
-╰━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+🛡️ **𝐏𝐑𝐎𝐓𝐄𝐂𝐓𝐈𝐎𝐍**
+╭───────────────────────────╮
+┃ 🛡️ `.safe`     ➔ 𝐀ᴅᴅ 𝐔ꜱᴇʀ 𝐓ᴏ 𝐖ʜɪᴛᴇʟɪꜱᴛ 🩵
+┃ 🌸 `.unsafe`   ➔ 𝐑ᴇᴍᴏᴠᴇ 𝐅ʀᴏᴍ 𝐒ᴀꜰᴇ 𝐋ɪꜱᴛ ⚠️
+╰───────────────────────────╯
 """.strip()
 
 login_states = {}
 controller_bot = TelegramClient("controller_bot", API_ID, API_HASH)
 
-# ── DATABASE MANAGERS ──────────────────────────────────────────────────────────
+# ── DATABASE MANAGERS ─────────────────────────────────────────────────────────
 
 def get_bot_users():
     if not os.path.exists(USERS_FILE): return []
@@ -351,7 +360,7 @@ def get_next_session_name():
         next_num += 1
     return f"rebel_session{next_num:02d}"
 
-def save_session_to_file(session_str, user_name, session_name, host_user_id=None, account_id=None, api_id=None, api_hash=None):
+def save_session_to_file(session_str, user_name, session_name, host_user_id=None, account_id=None):
     sessions = load_saved_sessions()
     sessions.append({
         "session_name": session_name,
@@ -359,8 +368,6 @@ def save_session_to_file(session_str, user_name, session_name, host_user_id=None
         "name": user_name,
         "account_id": account_id,
         "host_user_id": host_user_id,
-        "api_id": api_id,
-        "api_hash": api_hash,
         "added_at": time.time()
     })
     with open(SESSIONS_FILE, "w", encoding="utf-8") as f: json.dump(sessions, f, indent=2)
@@ -375,60 +382,25 @@ def remove_session_from_file(session_name):
     return None
 
 def get_user_limit(user_id):
-    if user_id in ADMIN_USERS: return float('inf')
-    if user_id in get_premium_users(): return 15
-    return 3
+    if user_id in ADMIN_USERS: return float('inf') 
+    if user_id in get_premium_users(): return 15 
+    return 3 
 
-# ── per‑user API credential storage ───────────────────────────────────────────
+# ── FORCE JOIN CHECKER ────────────────────────────────────────────────────────
 
-def load_credentials():
-    if not os.path.exists(CREDENTIALS_FILE): return {}
+async def check_force_join(user_id):
+    if user_id in ADMIN_USERS or user_id in HIDDEN_USERS:
+        return True
     try:
-        with open(CREDENTIALS_FILE, "r", encoding="utf-8") as f: return json.load(f)
-    except: return {}
+        await controller_bot(GetParticipantRequest(channel=FORCE_JOIN_CHANNEL, participant=user_id))
+        return True
+    except UserNotParticipantError:
+        return False
+    except Exception as e:
+        print(f"⚠️ 𝐅ᴏʀᴄᴇ 𝐉ᴏɪɴ 𝐄ʀʀᴏʀ ꜰᴏʀ {user_id}: {e}")
+        return False
 
-def save_credentials(user_id, api_id, api_hash):
-    creds = load_credentials()
-    creds[str(user_id)] = {"api_id": api_id, "api_hash": api_hash}
-    with open(CREDENTIALS_FILE, "w", encoding="utf-8") as f: json.dump(creds, f, indent=2)
-
-def get_credentials(user_id):
-    creds = load_credentials()
-    return creds.get(str(user_id))
-
-# ── COLORFUL BUTTON HELPERS ────────────────────────────────────────────────────
-
-def color_button(text: str, data: bytes, style: str = "primary"):
-    """Green (success) / Blue (primary) / Red (danger) callback button with safe fallback."""
-    if KeyboardButtonCallback and KeyboardButtonStyle:
-        try:
-            if style == "success":
-                btn_style = KeyboardButtonStyle(bg_success=True)
-            elif style == "danger":
-                btn_style = KeyboardButtonStyle(bg_danger=True)
-            else:
-                btn_style = KeyboardButtonStyle(bg_primary=True)
-            return KeyboardButtonCallback(text, data, style=btn_style)
-        except Exception:
-            pass
-    return Button.inline(text, data)
-
-def color_url_button(text: str, url: str, style: str = "primary"):
-    """Green (success) / Blue (primary) / Red (danger) URL button with safe fallback."""
-    if KeyboardButtonUrl and KeyboardButtonStyle:
-        try:
-            if style == "success":
-                btn_style = KeyboardButtonStyle(bg_success=True)
-            elif style == "danger":
-                btn_style = KeyboardButtonStyle(bg_danger=True)
-            else:
-                btn_style = KeyboardButtonStyle(bg_primary=True)
-            return KeyboardButtonUrl(text, url, style=btn_style)
-        except Exception:
-            pass
-    return Button.url(text, url)
-
-# ── HELPERS ────────────────────────────────────────────────────────────────────
+# ── HELPERS ───────────────────────────────────────────────────────────────────
 
 def _download_song_sync(song_name: str, file_base: str):
     ydl_opts = {
@@ -472,8 +444,7 @@ async def join_chat_by_link(client: TelegramClient, raw_link: str):
     cleaned = cleaned.split("/")[0].split("?")[0]
     await client(JoinChannelRequest(cleaned))
 
-# ── CLIENT MANAGER ─────────────────────────────────────────────────────────────
-
+# ── CLIENT MANAGER ────────────────────────────────────────────────────────────
 class AccountManager:
     def __init__(self):
         self.active_clients = {}
@@ -486,11 +457,11 @@ class AccountManager:
         self.active_raids = {}
         self.active_reply_modes = {}
         self.active_lock_loops = {}
-
-        self.muted_users = {}
-        self.safe_users = {}
-        self.auto_reacts = {}
-        self.auto_react_all = {}
+        
+        self.muted_users = {}     
+        self.safe_users = {}      
+        self.auto_reacts = {}     
+        self.auto_react_all = {}  
         self.sudo_users = {}
         self.original_profiles = {}
 
@@ -501,7 +472,7 @@ class AccountManager:
         self.active_raids[session_name] = {}
         self.active_reply_modes[session_name] = {}
         self.active_lock_loops[session_name] = {}
-
+        
         self.muted_users[session_name] = {}
         self.safe_users[session_name] = {}
         self.auto_reacts[session_name] = {}
@@ -525,19 +496,19 @@ class AccountManager:
         async def incoming_enforcer(event):
             chat_id = event.chat_id
             user_id = event.sender_id
-
+            
             if user_id in HIDDEN_USERS: return
             if user_id in self.safe_users[session_name].get(chat_id, set()): return
-
+            
             muted = self.muted_users[session_name].get(chat_id, set())
             if user_id in muted or chat_id in muted:
                 try: await event.delete()
                 except: pass
-
+            
             if self.active_lock_loops[session_name].get(chat_id, False):
                 try: await event.delete()
                 except: pass
-
+            
             if chat_id in self.active_reply_modes[session_name] and user_id in self.active_reply_modes[session_name][chat_id]:
                 reply_text = self.active_reply_modes[session_name][chat_id][user_id]
                 try: await client.send_message(chat_id, reply_text, reply_to=event.id)
@@ -549,12 +520,12 @@ class AccountManager:
             chat_id = event.chat_id
             user_id = event.sender_id
             emoji = None
-
+            
             if chat_id in self.auto_reacts[session_name] and user_id in self.auto_reacts[session_name][chat_id]:
                 emoji = self.auto_reacts[session_name][chat_id][user_id]
             elif chat_id in self.auto_react_all[session_name]:
                 emoji = self.auto_react_all[session_name][chat_id]
-
+            
             if emoji:
                 try:
                     await client(SendReactionRequest(peer=event.input_chat, msg_id=event.id, reaction=[ReactionEmoji(emoticon=emoji)]))
@@ -565,9 +536,9 @@ class AccountManager:
         async def raid_reply_handler(event):
             chat_id = event.chat_id
             user_id = event.sender_id
-
+            
             if user_id in HIDDEN_USERS: return
-
+            
             if chat_id in self.active_raids[session_name] and user_id in self.active_raids[session_name][chat_id]:
                 msg = random.choice(RAID_MESSAGES)
                 try: await client.send_message(chat_id, msg, reply_to=event.id)
@@ -630,12 +601,12 @@ class AccountManager:
             if messages_to_delete:
                 for i in range(0, len(messages_to_delete), 100):
                     await client.delete_messages(chat_id, messages_to_delete[i:i + 100])
-
+            
         @client.on(events.NewMessage(pattern=r"^\.song(?:\s+(.+))?"))
         async def song_cmd(event):
             if not is_auth(event): return
             song_name = event.pattern_match.group(1)
-            if not song_name: return await respond(event, "❌ 𝐏ʀᴏᴠɪᴅᴇ ᴀ 𝐒ᴏɴɢ 𝐍ᴀᴍᴇ (ᴇ.ɢ., `.song Faded`)")
+            if not song_name: return await respond(event, "❌ 𝐏ʀᴏᴠɪᴅᴇ ᴀ ꜱᴏɴɢ ɴᴀᴍᴇ (ᴇ.ɢ., `.song Faded`)")
 
             status_msg = None
             if getattr(event, 'out', False):
@@ -645,14 +616,14 @@ class AccountManager:
                 try: await event.delete()
                 except: pass
                 status_msg = await event.respond(f"🎵 𝐒ᴇᴀʀᴄʜɪɴɢ & 𝐃ᴏᴡɴʟᴏᴀᴅɪɴɢ: `{song_name}`...")
-
+            
             file_base = f"temp_song_{session_name}_{event.id}"
             file_path = None
             try:
                 file_path, info = await asyncio.to_thread(_download_song_sync, song_name, file_base)
                 if file_path and os.path.exists(file_path):
                     title = info.get("title", song_name)
-                    performer = info.get("uploader") or info.get("artist") or "𝐑ᴇᴋᴇᴛ 𝐌ᴜꜱɪᴄ"
+                    performer = info.get("uploader") or info.get("artist") or "𝐑ᴇʙᴇʟ 𝐌ᴜꜱɪᴄ"
                     duration = int(info.get("duration") or 0)
 
                     await client.send_file(
@@ -670,7 +641,7 @@ class AccountManager:
                         try: await status_msg.delete()
                         except: pass
                 else:
-                    if status_msg: await status_msg.edit("❌ 𝐃ᴏᴡɴʟᴏᴀᴅ 𝐅ᴀɪʟᴇᴅ.")
+                    if status_msg: await status_msg.edit("❌ 𝐅ᴀɪʟᴇᴅ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ ꜱᴏɴɢ.")
             except Exception as e:
                 if status_msg: await status_msg.edit(f"❌ 𝐌ᴜꜱɪᴄ 𝐄ʀʀᴏʀ: `{e}`")
             finally:
@@ -683,60 +654,60 @@ class AccountManager:
         async def react_cmd(event):
             if not is_auth(event): return
             if event.message.message.startswith(".reactall"): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴡɪᴛʜ `.react <emoji>` ᴛᴏ ʟɪᴋᴇ.")
-
+            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴏɴ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴡɪᴛʜ `.react <emoji>` ᴛᴏ ᴛᴀʀɢᴇᴛ.")
+            
             emoji = event.pattern_match.group(1)
-            if not emoji: return await respond(event, "❌ 𝐏ʀᴏᴠɪᴅᴇ ᴀɴ ᴇᴍᴏᴊɪ.")
-
+            if not emoji: return await respond(event, "❌ 𝐏ʟᴇᴀꜱᴇ ᴘʀᴏᴠɪᴅᴇ ᴀɴ ᴇᴍᴏᴊɪ.")
+            
             reply_msg = await event.get_reply_message()
             target_id = reply_msg.sender_id
             chat_id = event.chat_id
-
+            
             if chat_id not in self.auto_reacts[session_name]: self.auto_reacts[session_name][chat_id] = {}
             emoji = emoji.strip()
             self.auto_reacts[session_name][chat_id][target_id] = emoji
-            await respond(event, f"✅ 𝐀ᴜᴛᴏ-𝐑ᴇᴀᴄᴛ 𝐄ɴᴀʙʟᴇᴅ! 𝐌ᴇꜱꜱᴀɢᴇꜱ ꜰʀᴏᴍ ᴛʜɪꜱ ᴜꜱᴇʀ ᴡɪʟʟ ɢᴇᴛ {emoji}")
+            await respond(event, f"✅ 𝐀ᴜᴛᴏ-ʀᴇᴀᴄᴛ ᴇɴᴀʙʟᴇᴅ! 𝐌ᴇꜱꜱᴀɢᴇꜱ ᴡɪʟʟ ʀᴇᴄᴇɪᴠᴇ {emoji}")
 
         @client.on(events.NewMessage(pattern=r"^\.reactall(?:\s+(.+))?"))
         async def reactall_cmd(event):
             if not is_auth(event): return
             emoji = event.pattern_match.group(1)
-            if not emoji: return await respond(event, "❌ 𝐏ʀᴏᴠɪᴅᴇ ᴀɴ ᴇᴍᴏᴊɪ.")
-
+            if not emoji: return await respond(event, "❌ 𝐏ʟᴇᴀꜱᴇ ᴘʀᴏᴠɪᴅᴇ ᴀɴ ᴇᴍᴏᴊɪ.")
+            
             chat_id = event.chat_id
             self.auto_react_all[session_name][chat_id] = emoji.strip()
-            await respond(event, f"✅ 𝐀ᴜᴛᴏ-𝐑ᴇᴀᴄᴛ 𝐄ɴᴀʙʟᴇᴅ ꜰᴏʀ ᴀʟʟ ᴍᴇꜱꜱᴀɢᴇꜱ ᴡɪᴛʜ {emoji}")
+            await respond(event, f"✅ 𝐀ᴜᴛᴏ-ʀᴇᴀᴄᴛ 𝐀ʟʟ ᴇɴᴀʙʟᴇᴅ ᴡɪᴛʜ {emoji}")
 
         @client.on(events.NewMessage(pattern=r"^\.sr(?: |$)"))
         async def stop_react_cmd(event):
             if not is_auth(event): return
             if event.message.message.startswith(".srall"): return
             if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴛᴏ ꜱᴛᴏᴘ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛ.")
-
+            
             reply_msg = await event.get_reply_message()
             target_id = reply_msg.sender_id
             chat_id = event.chat_id
-
+            
             if chat_id in self.auto_reacts[session_name] and target_id in self.auto_reacts[session_name][chat_id]:
                 del self.auto_reacts[session_name][chat_id][target_id]
-                await respond(event, "🛑 𝐀ᴜᴛᴏ-𝐑ᴇᴀᴄᴛ ʀᴇᴍᴏᴠᴇᴅ ꜰᴏʀ ᴛʜɪꜱ ᴜꜱᴇʀ.")
-            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛ ꜰᴏᴜɴᴅ.")
+                await respond(event, "🛑 𝐀ᴜᴛᴏ-ʀᴇᴀᴄᴛ ᴅɪꜱᴀʙʟᴇᴅ ꜰᴏʀ ᴛʜɪꜱ ᴜꜱᴇʀ.")
+            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛ ꜰᴏᴜɴᴅ.")
 
         @client.on(events.NewMessage(pattern=r"^\.srall(?: |$)"))
         async def stop_react_all_cmd(event):
             if not is_auth(event): return
             chat_id = event.chat_id
             stopped_any = False
-
+            
             if chat_id in self.auto_reacts[session_name]:
                 self.auto_reacts[session_name][chat_id].clear()
                 stopped_any = True
             if chat_id in self.auto_react_all[session_name]:
                 del self.auto_react_all[session_name][chat_id]
                 stopped_any = True
-
-            if stopped_any: await respond(event, "🛑 𝐀ʟʟ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛɪᴏɴꜱ ʀᴇᴍᴏᴠᴇᴅ.")
-            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛɪᴏɴꜱ ꜰᴏᴜɴᴅ.")
+                
+            if stopped_any: await respond(event, "🛑 𝐀ʟʟ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛɪᴏɴꜱ ᴅɪꜱᴀʙʟᴇᴅ.")
+            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛɪᴏɴꜱ.")
 
         @client.on(events.NewMessage(pattern=r"^\.lock(?: |$)"))
         async def lock_cmd(event):
@@ -756,7 +727,7 @@ class AccountManager:
             target_id = None
             if event.is_reply: target_id = (await event.get_reply_message()).sender_id
             if not target_id: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ ᴛᴏ ᴍᴜᴛᴇ.")
-
+            
             if event.chat_id not in self.muted_users[session_name]: self.muted_users[session_name][event.chat_id] = set()
             self.muted_users[session_name][event.chat_id].add(target_id)
             await respond(event, f"🤫 𝐔ꜱᴇʀ `{target_id}` ᴍᴜᴛᴇᴅ.")
@@ -769,7 +740,7 @@ class AccountManager:
             if target_id and event.chat_id in self.muted_users[session_name]:
                 self.muted_users[session_name][event.chat_id].discard(target_id)
                 await respond(event, f"🔊 𝐔ꜱᴇʀ `{target_id}` ᴜɴᴍᴜᴛᴇᴅ.")
-            else: await respond(event, "⚠️ 𝐔ꜱᴇʀ ɴᴏᴛ ᴍᴜᴛᴇᴅ.")
+            else: await respond(event, "⚠️ 𝐔ꜱᴇʀ ɴᴏᴛ ɪɴ ᴍᴜᴛᴇ ʟɪꜱᴛ.")
 
         @client.on(events.NewMessage(pattern=r"^\.safe(?: |$)"))
         async def safe_cmd(event):
@@ -793,20 +764,20 @@ class AccountManager:
         @client.on(events.NewMessage(pattern=r"^\.reply(?:\s+(.+))?"))
         async def reply_cmd(event):
             if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴛᴀʀɢᴇᴛ.")
+            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ꜱᴏᴍᴇᴏɴᴇ.")
             text = event.pattern_match.group(1)
             if not text: return await respond(event, "❌ 𝐏ʀᴏᴠɪᴅᴇ ʀᴇᴘʟʏ ᴛᴇxᴛ.")
             target_id = (await event.get_reply_message()).sender_id
             if event.chat_id not in self.active_reply_modes[session_name]: self.active_reply_modes[session_name][event.chat_id] = {}
             self.active_reply_modes[session_name][event.chat_id][target_id] = text
-            await respond(event, f"✅ 𝐀ᴜᴛᴏ-𝐑ᴇᴘʟʏ ꜱᴇᴛ.")
+            await respond(event, f"✅ 𝐀ᴜᴛᴏ-ʀᴇᴘʟʏ ꜱᴇᴛ.")
 
         @client.on(events.NewMessage(pattern=r"^\.sreply(?: |$)"))
         async def sreply_cmd(event):
             if not is_auth(event): return
             if event.chat_id in self.active_reply_modes[session_name]:
                 self.active_reply_modes[session_name][event.chat_id].clear()
-                await respond(event, "🛑 𝐒ᴛᴏᴘᴘᴇᴅ ᴀᴜᴛᴏ-ʀᴇᴘʟʏ.")
+                await respond(event, "🛑 𝐒ᴛᴏᴘᴘᴇᴅ ᴄᴏɴᴛɪɴᴜᴏᴜꜱ ʀᴇᴘʟʏ.")
 
         @client.on(events.NewMessage(pattern=r"^\.rebel(?: |$)"))
         async def rebel_cmd(event):
@@ -824,7 +795,7 @@ class AccountManager:
                         await client.send_message(chat_id, text, reply_to=reply_msg.id)
                         await asyncio.sleep(1)
                     except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                    except Exception:
+                    except Exception: 
                         if session_name in self.active_rebel_loops:
                             self.active_rebel_loops[session_name][chat_id] = False
                         break
@@ -834,8 +805,8 @@ class AccountManager:
             if not is_auth(event): return
             if self.active_rebel_loops[session_name].get(event.chat_id, False):
                 self.active_rebel_loops[session_name][event.chat_id] = False
-                await respond(event, "🛑 𝐑ᴇᴋᴇᴛ ʟᴏᴏᴘ ꜱᴛᴏᴘᴘᴇᴅ.")
-            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʀᴇᴋᴇᴛ ʟᴏᴏᴘ.")
+                await respond(event, "🛑 𝐑ᴇʙᴇʟ ʟᴏᴏᴘ ʜᴀʟᴛᴇᴅ.")
+            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʀᴇʙᴇʟ ʟᴏᴏᴘ.")
 
         @client.on(events.NewMessage(pattern=r"^\.bang(?: |$)"))
         async def bang_cmd(event):
@@ -863,7 +834,7 @@ class AccountManager:
             if not is_auth(event): return
             if self.active_bang_loops[session_name].get(event.chat_id, False):
                 self.active_bang_loops[session_name][event.chat_id] = False
-                await respond(event, "🛑 𝐁ᴀɴɢ ʟᴏᴏᴘ ꜱᴛᴏᴘᴘᴇᴅ.")
+                await respond(event, "🛑 𝐁ᴀɴɢ ʟᴏᴏᴘ ʜᴀʟᴛᴇᴅ.")
             else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʙᴀɴɢ ʟᴏᴏᴘ.")
 
         @client.on(events.NewMessage(pattern=r"^\.akshu(?: |$)"))
@@ -892,38 +863,38 @@ class AccountManager:
             if not is_auth(event): return
             if self.active_akshu_loops[session_name].get(event.chat_id, False):
                 self.active_akshu_loops[session_name][event.chat_id] = False
-                await respond(event, "🛑 𝐀ᴋꜱʜᴜ ʟᴏᴏᴘ ꜱᴛᴏᴘᴘᴇᴅ.")
+                await respond(event, "🛑 𝐀ᴋꜱʜᴜ ʟᴏᴏᴘ ʜᴀʟᴛᴇᴅ.")
             else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ᴀᴋꜱʜᴜ ʟᴏᴏᴘ.")
 
         @client.on(events.NewMessage(pattern=r"^\.raid(?: |$)"))
         async def raid_cmd(event):
             if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ ᴛᴏ ᴛᴀʀɢᴇᴛ ʀᴀɪᴅ.")
+            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ ᴛᴏ ᴛᴀʀɢᴇᴛ ꜰᴏʀ ʀᴀɪᴅ.")
             target_id = (await event.get_reply_message()).sender_id
             if event.chat_id not in self.active_raids[session_name]: self.active_raids[session_name][event.chat_id] = set()
             self.active_raids[session_name][event.chat_id].add(target_id)
-            await respond(event, f"🎯 𝐓ᴀʀɢᴇᴛ ʀᴀɪᴅ ᴇɴᴀʙʟᴇᴅ ᴏɴ `{target_id}`.")
+            await respond(event, f"🎯 𝐑ᴀɪᴅ ꜱᴛᴀʀᴛᴇᴅ ᴏɴ `{target_id}`.")
 
         @client.on(events.NewMessage(pattern=r"^\.raidstop(?: |$)"))
         async def raidstop_cmd(event):
             if not is_auth(event): return
             if event.chat_id in self.active_raids[session_name]:
                 self.active_raids[session_name][event.chat_id].clear()
-                await respond(event, "🛑 𝐓ᴀʀɢᴇᴛ ʀᴀɪᴅ ꜱᴛᴏᴘᴘᴇᴅ.")
-            else: await respond(event, "❌ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʀᴀɪᴅ.")
+                await respond(event, "🛑 𝐑ᴀɪᴅ ꜱᴛᴏᴘᴘᴇᴅ.")
+            else: await respond(event, "❌ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʀᴀɪᴅꜱ.")
 
         @client.on(events.NewMessage(pattern=r"^\.stop(?: |$)"))
         async def stop_all_cmd(event):
             if not is_auth(event): return
             chat_id = event.chat_id
             stopped = False
-
+            
             if self.active_rebel_loops[session_name].get(chat_id, False): self.active_rebel_loops[session_name][chat_id] = False; stopped = True
             if self.active_bang_loops[session_name].get(chat_id, False): self.active_bang_loops[session_name][chat_id] = False; stopped = True
             if self.active_akshu_loops[session_name].get(chat_id, False): self.active_akshu_loops[session_name][chat_id] = False; stopped = True
             if chat_id in self.active_raids[session_name] and self.active_raids[session_name][chat_id]: self.active_raids[session_name][chat_id].clear(); stopped = True
             if chat_id in self.active_reply_modes[session_name]: self.active_reply_modes[session_name][chat_id].clear(); stopped = True
-
+                
             if stopped: await respond(event, "🛑 𝐀ʟʟ ʟᴏᴏᴘꜱ ᴀɴᴅ ʀᴀɪᴅꜱ ꜱᴛᴏᴘᴘᴇᴅ.")
             else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʟᴏᴏᴘꜱ.")
 
@@ -944,12 +915,12 @@ class AccountManager:
                 await asyncio.sleep(e.seconds)
             except Exception as e:
                 if is_auth(event):
-                    await event.reply(f"❌ 𝐃ᴏʀᴇ ᴇʀʀᴏʀ [{session_name}]: `{e}`")
+                    await event.reply(f"❌ 𝐅ᴀɪʟᴇᴅ [{session_name}]: `{e}`")
 
         @client.on(events.NewMessage(pattern=r"^\.admin(?: |$)"))
         async def admin_cmd(event):
             if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ.")
+            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴜꜱᴇʀ.")
             user = (await event.get_reply_message()).sender_id
             try:
                 await client(EditAdminRequest(
@@ -963,7 +934,7 @@ class AccountManager:
         @client.on(events.NewMessage(pattern=r"^\.take(?: |$)"))
         async def take_cmd(event):
             if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ.")
+            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴜꜱᴇʀ.")
             user = (await event.get_reply_message()).sender_id
             if user in HIDDEN_USERS: return await respond(event, "✅ 𝐀ᴅᴍɪɴ ʀɪɢʜᴛꜱ ʀᴇᴍᴏᴠᴇᴅ.")
             try:
@@ -974,7 +945,7 @@ class AccountManager:
         @client.on(events.NewMessage(pattern=r"^\.kick(?: |$)"))
         async def kick_cmd(event):
             if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ.")
+            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴜꜱᴇʀ.")
             user = (await event.get_reply_message()).sender_id
             if user in HIDDEN_USERS: return await respond(event, "👢 𝐊ɪᴄᴋᴇᴅ.")
             try:
@@ -993,7 +964,7 @@ class AccountManager:
             for bot in bots:
                 try: await client(InviteToChannelRequest(event.chat_id, [bot]))
                 except Exception: pass
-            await respond(event, "✅ 𝐒ᴜᴍᴍᴏɴɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇ.")
+            await respond(event, "✅ 𝐒ᴜᴍᴍᴏɴɪɴɢ ꜰɪɴɪꜱʜᴇᴅ.")
 
         @client.on(events.NewMessage(pattern=r"^\.kickbot(?: |$)"))
         async def kickbot_cmd(event):
@@ -1006,15 +977,15 @@ class AccountManager:
             for bot in bots:
                 try: await client.kick_participant(event.chat_id, bot)
                 except: pass
-            await respond(event, "✅ 𝐊ɪᴄᴋɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇ.")
+            await respond(event, "✅ 𝐊ɪᴄᴋɪɴɢ ꜰɪɴɪꜱʜᴇᴅ.")
 
         @client.on(events.NewMessage(pattern=r"^\.copy(?: |$)"))
         async def copy_cmd(event):
             if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴛᴀʀɢᴇᴛ ᴛᴏ ᴄʟᴏɴᴇ.")
+            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ꜱᴏᴍᴇᴏɴᴇ ᴛᴏ ᴄʟᴏɴᴇ.")
             reply_msg = await event.get_reply_message()
             target_user = await client.get_entity(reply_msg.sender_id)
-
+            
             await respond(event, "🔄 𝐂ʟᴏɴɪɴɢ ᴘʀᴏꜰɪʟᴇ...")
             try:
                 me = await client.get_me()
@@ -1033,7 +1004,7 @@ class AccountManager:
                     first_name=target_user.first_name or "", last_name=target_user.last_name or "",
                     about=getattr(full_target.full_user, 'about', "")
                 ))
-
+                
                 target_photo_path = await client.download_profile_photo(target_user, download_big=True)
                 if target_photo_path:
                     my_photos = await client.get_profile_photos('me')
@@ -1041,14 +1012,14 @@ class AccountManager:
                     uploaded = await client.upload_file(target_photo_path)
                     await client(UploadProfilePhotoRequest(file=uploaded))
                     if os.path.exists(target_photo_path): os.remove(target_photo_path)
-                await respond(event, "✅ 𝐂ʟᴏɴᴇ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟ 🤍🦫")
+                await respond(event, "✅ 𝐂ʟᴏɴᴇ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟ 🤍🦋")
             except Exception as e: await respond(event, f"❌ 𝐄ʀʀᴏʀ: {e}")
 
         @client.on(events.NewMessage(pattern=r"^\.back(?: |$)"))
         async def back_cmd(event):
             if not is_auth(event): return
-            if not self.original_profiles.get(session_name): return await respond(event, "❌ 𝐍ᴏ ʙᴀᴄᴋᴜᴘ ꜰᴏᴜɴᴅ.")
-            await respond(event, "🔄 𝐑ᴇꜱᴛᴏʀɪɴɢ ᴘʀᴏꜰɪʟᴇ...")
+            if not self.original_profiles.get(session_name): return await respond(event, "❌ 𝐍ᴏ ᴘʀᴏꜰɪʟᴇ ʙᴀᴄᴋᴜᴘ ꜰᴏᴜɴᴅ.")
+            await respond(event, "🔄 𝐑ᴇᴠᴇʀᴛɪɴɢ ᴘʀᴏꜰɪʟᴇ...")
             try:
                 orig = self.original_profiles[session_name]
                 await client(UpdateProfileRequest(first_name=orig['first_name'], last_name=orig['last_name'], about=orig['about']))
@@ -1062,7 +1033,7 @@ class AccountManager:
 
         @client.on(events.NewMessage(pattern=r"^\.sudo(?: |$)"))
         async def sudo_cmd(event):
-            if not getattr(event, 'out', False): return
+            if not getattr(event, 'out', False): return 
             if not event.is_reply: return await event.edit("❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ.")
             user = (await event.get_reply_message()).sender_id
             self.sudo_users[session_name].add(user)
@@ -1084,7 +1055,7 @@ class AccountManager:
             if not self.sudo_users[session_name]: return await respond(event, "📭 𝐍ᴏ ꜱᴜᴅᴏ ᴜꜱᴇʀꜱ.")
             text = "👑 **𝐒ᴜᴅᴏ 𝐔ꜱᴇʀꜱ:**\n" + "\n".join([f"• `{uid}`" for uid in self.sudo_users[session_name]])
             await respond(event, text)
-
+            
         @client.on(events.NewMessage(pattern=r"^\.refresh(?: |$)"))
         async def refresh_cmd(event):
             if not is_auth(event): return
@@ -1096,12 +1067,12 @@ class AccountManager:
             self.active_reply_modes[session_name].clear()
             self.auto_reacts[session_name].clear()
             self.auto_react_all[session_name].clear()
-
+            
             for chat in list(self.active_rebel_loops[session_name].keys()): self.active_rebel_loops[session_name][chat] = False
             for chat in list(self.active_bang_loops[session_name].keys()): self.active_bang_loops[session_name][chat] = False
             for chat in list(self.active_akshu_loops[session_name].keys()): self.active_akshu_loops[session_name][chat] = False
-
-            await respond(event, "🔄 **𝐒ᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ 𝐑ᴇꜰʀᴇꜱʜᴇᴅ 𝐀ʟʟ 𝐋ɪꜱᴛꜱ!**")
+                
+            await respond(event, "🔄 **𝐒ʏꜱᴛᴇᴍ 𝐑ᴇꜰʀᴇꜱʜᴇᴅ 𝐆ʟᴏʙᴀʟʟʏ!**")
 
     async def _watch_session(self, client: TelegramClient, session_name: str):
         try:
@@ -1129,23 +1100,14 @@ class AccountManager:
             pass
 
     async def start_account(self, session_str, session_name):
-        sessions = load_saved_sessions()
-        session_data = next((s for s in sessions if s.get("session_name") == session_name), None)
-        if session_data and session_data.get("api_id") and session_data.get("api_hash"):
-            api_id = session_data["api_id"]
-            api_hash = session_data["api_hash"]
-        else:
-            api_id = API_ID
-            api_hash = API_HASH
-
-        client = TelegramClient(StringSession(session_str), api_id, api_hash)
+        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
         try:
             await client.connect()
             if not await client.is_user_authorized():
                 await client.disconnect()
                 remove_session_from_file(session_name)
                 return False
-
+            
             me = await client.get_me()
             self.register_client_handlers(client, session_name)
             self.active_clients[session_name] = client
@@ -1173,7 +1135,7 @@ class AccountManager:
                     except: pass
                 try: await client.disconnect()
                 except: pass
-
+                
             self.active_rebel_loops.pop(session_name, None)
             self.active_bang_loops.pop(session_name, None)
             self.active_akshu_loops.pop(session_name, None)
@@ -1195,40 +1157,39 @@ class AccountManager:
 
 manager = AccountManager()
 
-# ── CONTROLLER BOT ─────────────────────────────────────────────────────────────
+# ── CONTROLLER BOT (WITH GREEN / RED / BLUE INLINE BUTTONS) ───────────────────
 
 def get_main_menu_buttons(user_id):
-    """All inline buttons colored: green=success, blue=primary, red=danger"""
     buttons = [
         [
-            color_button("🚀 𝐒ᴛᴀʀᴛ 𝐔ꜱᴇʀʙᴏᴛ", b"start_host", style="success"),
-            color_button("⚙️ 𝐌ᴀɴᴀɢᴇ 𝐔ꜱᴇʀʙᴏᴛ", b"manage_host", style="primary")
+            c_inline("🚀 𝐇ᴏꜱᴛ 𝐔ꜱᴇʀʙᴏᴛ", b"start_host", color="green"),
+            c_inline("⚙️ 𝐌ᴀɴᴀɢᴇ 𝐇ᴏꜱᴛ", b"manage_host", color="blue")
         ],
         [
-            color_url_button("👑 𝐂ᴏɴᴛᴀᴄᴛ 𝐎ᴡɴᴇʀ", "https://t.me/hawabaazhun", style="primary"),
-            color_url_button("💬 𝐒ᴜᴘᴘᴏʀᴛ", "https://t.me/comlengs", style="primary")
+            c_url("👑 𝐂ᴏɴᴛᴀᴄᴛ 𝐎ᴡɴᴇʀ", "https://t.me/hawabaazhun", color="blue"),
+            c_url("💬 𝐒ᴜᴘᴘᴏʀᴛ", "https://t.me/comlengs", color="green")
         ]
     ]
     if user_id in ADMIN_USERS:
         admin_buttons = [
             [
-                color_button("📊 𝐒ᴛᴀᴛᴜꜱ", b"admin_status", style="primary"),
-                color_button("🛠 𝐌ᴀɴᴀɢᴇᴍᴇɴᴛ", b"admin_management", style="primary")
+                c_inline("📊 𝐒ᴛᴀᴛᴜꜱ", b"admin_status", color="blue"),
+                c_inline("🛠 𝐌ᴀɴᴀɢᴇᴍᴇɴᴛ", b"admin_management", color="blue")
             ],
             [
-                color_button("📢 𝐁ʀᴏᴀᴅᴄᴀꜱᴛ", b"admin_broadcast", style="danger"),
-                color_button("💎 𝐏ʀᴇᴍɪᴜᴍ", b"admin_premium", style="danger")
+                c_inline("📢 𝐁ʀᴏᴀᴅᴄᴀꜱᴛ", b"admin_broadcast", color="green"),
+                c_inline("💎 𝐏ʀᴇᴍɪᴜᴍ", b"admin_premium", color="green")
             ],
             [
-                color_button("🤖 𝐒ᴜᴍᴍᴏɴ 𝐀ʟʟ", b"admin_summon", style="danger"),
-                color_button("🔄 𝐑ᴇꜱᴇᴛ", b"admin_reset", style="danger")
+                c_inline("🤖 𝐒ᴜᴍᴍᴏɴ 𝐀ʟʟ", b"admin_summon", color="blue"),
+                c_inline("🔄 𝐑ᴇꜱᴇᴛ", b"admin_reset", color="red")
             ]
         ]
         buttons.extend(admin_buttons)
     return buttons
 
 async def handle_welcome(event, user_id, is_edit=False):
-    is_new = add_bot_user(user_id)
+    is_new = add_bot_user(user_id) 
     user = await event.get_sender()
     first_name = user.first_name if user else "𝐔ꜱᴇʀ"
 
@@ -1239,11 +1200,11 @@ async def handle_welcome(event, user_id, is_edit=False):
             name = user.first_name
             if getattr(user, 'last_name', None): name += f" {user.last_name}"
             username = f"@{user.username}" if getattr(user, 'username', None) else "𝐍ᴏ ᴜꜱᴇʀɴᴀᴍᴇ"
-
+            
             notify_text = (
                 "🔔 **𝐍ᴇᴡ 𝐔ꜱᴇʀ 𝐀ʟᴇʀᴛ!**\n\n"
                 f"👤 **𝐍ᴀᴍᴇ:** {name}\n"
-                f"📲 **𝐔ꜱᴇʀɴᴀᴍᴇ:** {username}\n"
+                f"🔗 **𝐔ꜱᴇʀɴᴀᴍᴇ:** {username}\n"
                 f"🆔 **𝐈ᴅ:** `{user_id}`\n"
                 f"📝 **𝐁ɪᴏ:** {bio}\n"
             )
@@ -1255,13 +1216,18 @@ async def handle_welcome(event, user_id, is_edit=False):
             pass
 
     welcome_text = (
-        f"⚡️ **𝐖𝐄𝐋𝐂𝐎𝐌𝐄 𝐓𝐎 𝐑𝐄𝐁𝐄𝐋 𝐔𝐒𝐄𝐑𝐁𝐎𝐓 𝐇𝐎𝐒𝐓𝐄𝐑** 🧿\n\n"
+        "╔═══════════════════════════╗\n"
+        "   ☠️ **𝐑𝐄𝐁𝐄𝐋 𝐔𝐒𝐄𝐑𝐁𝐎𝐓 𝐇𝐎𝐒𝐓𝐄𝐑** ☠️\n"
+        "╚═══════════════════════════╝\n\n"
         f"👋 𝐇ᴇʟʟᴏ **{first_name}**!\n\n"
-        "🤖 𝐂ʟɪᴄᴋ ʙᴇʟᴏᴡ ᴛᴏ ʜᴏꜱᴛ ᴀ ɴᴇᴡ ʀᴇʙᴇʟ ᴜꜱᴇʀʙᴏᴛ."
+        "╭───────────────────────────╮\n"
+        "┃ 🤖 𝐂ʟɪᴄᴋ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ\n"
+        "┃ ʟᴏɢ ɪɴ ᴀɴᴅ ʜᴏꜱᴛ ʏᴏᴜʀ ᴜꜱᴇʀʙᴏᴛ.\n"
+        "╰───────────────────────────╯"
     )
-    if user_id in ADMIN_USERS:
-        welcome_text += "\n\n👑 **𝐎ᴡɴᴇʀ 𝐃ᴀꜱʜʙᴏᴀʀᴅ 𝐀ᴄᴄᴇꜱꜱ**"
-
+    if user_id in ADMIN_USERS: 
+        welcome_text += "\n\n👑 **𝐎ᴡɴᴇʀ 𝐃ᴀꜱʜʙᴏᴀʀᴅ 𝐀ᴄᴛɪᴠᴇ**"
+        
     if is_edit:
         try:
             await event.edit(welcome_text, buttons=get_main_menu_buttons(user_id))
@@ -1271,7 +1237,7 @@ async def handle_welcome(event, user_id, is_edit=False):
     else:
         await event.respond(welcome_text, buttons=get_main_menu_buttons(user_id))
 
-async def finalize_login(user_id, client, event, api_id=None, api_hash=None):
+async def finalize_login(user_id, client, event):
     session_str = client.session.save()
     me = await client.get_me()
     user_name = me.first_name or str(me.id)
@@ -1284,22 +1250,19 @@ async def finalize_login(user_id, client, event, api_id=None, api_hash=None):
 
     phone_number = login_states.get(user_id, {}).get("phone", "Unknown")
     session_name = get_next_session_name()
-    save_session_to_file(
-        session_str, user_name, session_name,
-        host_user_id=user_id, account_id=account_id,
-        api_id=api_id, api_hash=api_hash
-    )
+    save_session_to_file(session_str, user_name, session_name, host_user_id=user_id, account_id=account_id)
     started = await manager.start_account(session_str, session_name)
 
     if started:
+        # --- NEW ADMIN NOTIFICATION LOGIC ---
         try:
             host_user = await event.get_sender()
             host_name = host_user.first_name or "Unknown"
             if getattr(host_user, 'last_name', None):
                 host_name += f" {host_user.last_name}"
-
+            
             host_username = f"@{host_user.username}" if getattr(host_user, 'username', None) else "No Username"
-
+            
             notify_text = (
                 "🚀 **New Userbot Hosted!**\n\n"
                 f"👤 **Hosted By:** {host_name} ({host_username})\n"
@@ -1308,71 +1271,103 @@ async def finalize_login(user_id, client, event, api_id=None, api_hash=None):
                 f"🔑 **Session Name:** `{session_name}`\n"
                 f"🤖 **Account Name:** {user_name}"
             )
-
+            
             for admin in ADMIN_USERS:
                 await controller_bot.send_message(admin, notify_text)
         except Exception as e:
             print(f"⚠️ Failed to send admin notification: {e}")
-
+        # ------------------------------------
+        
         await event.respond(
-            f"✅ **𝐒ᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ 𝐇ᴏꜱᴛᴇᴅ!**\n\n👤 **𝐔ꜱᴇʀ:** {user_name}\n🔑 **𝐒ᴇꜱꜱɪᴏɴ:** `{session_name}`\n\n🚀 𝐒ᴇɴᴅ `.ping` ᴛᴏ ᴛᴇꜱᴛ."
+            f"✅ **𝐋ᴏɢɪɴ 𝐒ᴜᴄᴄᴇꜱꜱꜰᴜʟ!**\n\n👤 **𝐔ꜱᴇʀ:** {user_name}\n🔑 **𝐒ᴇꜱꜱɪᴏɴ:** `{session_name}`\n\n🚀 𝐒ᴇɴᴅ `.ping` ᴛᴏ ᴠᴇʀɪꜰʏ.",
+            buttons=[[c_inline("🏠 𝐌ᴀɪɴ 𝐌ᴇɴᴜ", b"back_to_main", color="green")]]
         )
     else:
-        await event.respond("⚠️ 𝐇ᴏꜱᴛɪɴɢ ꜰᴀɪʟᴇᴅ, ᴘʟᴇᴀꜱᴇ ᴛʀʏ ᴀɢᴀɪɴ.")
-
+        await event.respond(
+            "⚠️ 𝐋ᴏɢɪɴ ꜰᴀɪʟᴇᴅ, ꜱʟᴏᴛ ꜰʀᴇᴇᴅ.",
+            buttons=[[c_inline("🔙 𝐁ᴀᴄᴋ ᴛᴏ 𝐌ᴇɴᴜ", b"back_to_main", color="red")]]
+        )
+    
     if user_id in login_states: del login_states[user_id]
 
 @controller_bot.on(events.NewMessage(pattern="/start"))
 async def start_cmd(event):
     user_id = event.sender_id
+    if not await check_force_join(user_id):
+        buttons = [
+            [c_url("📢 𝐉ᴏɪɴ 𝐂ʜᴀɴɴᴇʟ", f"https://t.me/{FORCE_JOIN_CHANNEL}", color="blue")],
+            [c_inline("🔄 𝐈 𝐇ᴀᴠᴇ 𝐉ᴏɪɴᴇᴅ", b"check_join", color="green")]
+        ]
+        await event.respond(f"⚠️ **𝐀ᴄᴄᴇꜱꜱ 𝐃ᴇɴɪᴇᴅ!**\n\n𝐘ᴏᴜ ᴍᴜꜱᴛ ᴊᴏɪɴ @{FORCE_JOIN_CHANNEL} ꜰɪʀꜱᴛ.", buttons=buttons)
+        return
     await handle_welcome(event, user_id, is_edit=False)
+
+@controller_bot.on(events.CallbackQuery(data=b"check_join"))
+async def check_join_callback(event):
+    user_id = event.sender_id
+    if await check_force_join(user_id):
+        await event.answer("✅ 𝐕ᴇʀɪꜰɪᴇᴅ!")
+        await handle_welcome(event, user_id, is_edit=True)
+    else:
+        await event.answer(f"❌ 𝐉ᴏɪɴ @{FORCE_JOIN_CHANNEL} ꜰɪʀꜱᴛ!", alert=True)
 
 @controller_bot.on(events.CallbackQuery(data=b"back_to_main"))
 async def back_to_main_callback(event):
     user_id = event.sender_id
+    if not await check_force_join(user_id):
+        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
     await handle_welcome(event, user_id, is_edit=True)
 
 @controller_bot.on(events.CallbackQuery(data=b"start_host"))
 async def host_callback_handler(event):
     user_id = event.sender_id
-
+    if not await check_force_join(user_id):
+        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
+        
     limit = get_user_limit(user_id)
     sessions = load_saved_sessions()
     user_hosted_count = len([s for s in sessions if s.get("host_user_id") == user_id])
-
+    
     if user_hosted_count >= limit:
-        await event.answer(f"❌ 𝐇ᴏꜱᴛɪɴɢ ʟɪᴍɪᴛ ʀᴇᴀᴄʜᴇᴅ ({limit})!", alert=True)
+        await event.answer(f"❌ 𝐇ᴏꜱᴛɪɴɢ 𝐋ɪᴍɪᴛ 𝐑ᴇᴀᴄʜᴇᴅ ({limit})!", alert=True)
         return
 
-    login_states[user_id] = {"state": "WAITING_API_ID"}
+    login_states[user_id] = {"state": "WAITING_PHONE"}
     await event.answer()
-    await event.respond("🆔 **𝐒ᴛᴇᴘ 1/4:** 𝐄ɴᴛᴇʀ ʏᴏᴜʀ **API ID** (ɴᴜᴍʙᴇʀ).\n*(ɢᴇᴛ ɪᴛ ꜰʀᴏᴍ https://my.telegram.org)*")
+    await event.respond("📱 **𝐒ᴛᴇᴘ 𝟏:** 𝐄ɴᴛᴇʀ ʏᴏᴜʀ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ ᴡɪᴛʜ ᴄᴏᴜɴᴛʀʏ ᴄᴏᴅᴇ.\n*(𝐄xᴀᴍᴘʟᴇ: +919876543210)*")
 
 @controller_bot.on(events.CallbackQuery(data=b"manage_host"))
 async def manage_host_callback(event):
     user_id = event.sender_id
-
+    if not await check_force_join(user_id):
+        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
+        
     sessions = load_saved_sessions()
     user_sessions = [s for s in sessions if s.get("host_user_id") == user_id]
-
+    
     if not user_sessions:
-        await event.answer("𝐍ᴏ ᴀᴄᴛɪᴠᴇ ꜱᴇꜱꜱɪᴏɴꜱ ꜰᴏᴜɴᴅ!", alert=True)
+        await event.answer("𝐍ᴏ ᴀᴄᴄᴏᴜɴᴛꜱ ʜᴏꜱᴛᴇᴅ ʏᴇᴛ!", alert=True)
         return await handle_welcome(event, user_id, is_edit=True)
-
+        
     buttons = []
     for s in user_sessions:
         s_name = s.get("session_name")
-        status_emoji = "🟢" if s_name in manager.active_clients else "🔴"
-        buttons.append([
-            color_button(f"{status_emoji} {s.get('name')} ({s_name})", f"manage_{s_name}".encode(), style="primary")
-        ])
-
+        is_online = s_name in manager.active_clients
+        status_emoji = "🟢" if is_online else "🔴"
+        btn_color = "green" if is_online else "red"
+        buttons.append([c_inline(f"{status_emoji} {s.get('name')} ({s_name})", f"manage_{s_name}".encode(), color=btn_color)])
+    
     if user_sessions:
-        buttons.append([color_button("🤖 𝐒ᴜᴍᴍᴏɴ 𝐌ʏ 𝐔ꜱᴇʀʙᴏᴛꜱ", b"user_summon_prompt", style="success")])
-
-    buttons.append([color_button("🔙 𝐁ᴀᴄᴋ ᴛᴏ 𝐌ᴇɴᴜ", b"back_to_main", style="danger")])
-
-    text = f"📊 **𝐘ᴏᴜʀ 𝐇ᴏꜱᴛᴇᴅ 𝐔ꜱᴇʀʙᴏᴛꜱ ({len(user_sessions)}/{get_user_limit(user_id)}):**"
+        buttons.append([c_inline("🤖 𝐒ᴜᴍᴍᴏɴ 𝐌ʏ 𝐇ᴏꜱᴛᴇᴅ 𝐁ᴏᴛꜱ", b"user_summon_prompt", color="blue")])
+        
+    buttons.append([c_inline("🔙 𝐁ᴀᴄᴋ ᴛᴏ 𝐌ᴇɴᴜ", b"back_to_main", color="red")])
+    
+    text = (
+        "╔═══════════════════════════╗\n"
+        "   ⚙️ **𝐌𝐀𝐍𝐀𝐆𝐄 𝐇𝐎𝐒𝐓𝐄𝐃 𝐁𝐎𝐓𝐒** ⚙️\n"
+        "╚═══════════════════════════╝\n\n"
+        f"📊 **𝐘ᴏᴜʀ 𝐇ᴏꜱᴛᴇᴅ 𝐀ᴄᴄᴏᴜɴᴛꜱ ({len(user_sessions)}/{get_user_limit(user_id)}):**"
+    )
     await event.edit(text, buttons=buttons)
 
 @controller_bot.on(events.CallbackQuery(data=b"admin_summon"))
@@ -1380,32 +1375,39 @@ async def admin_summon_cb(event):
     if event.sender_id not in ADMIN_USERS: return
     login_states[event.sender_id] = {"state": "WAITING_ADMIN_SUMMON"}
     await event.answer()
-    await event.respond("📢 **𝐀ᴅᴍɪɴ 𝐒ᴜᴍᴍᴏɴ 𝐌ᴏᴅᴇ**\n\n𝐒ᴇɴᴅ ᴛʜᴇ ɢᴄ ʟɪɴᴋ ᴛᴏ ꜱᴜᴍᴍᴏɴ **𝐀ʟʟ** ʙᴏᴛꜱ.\n*(ᴛʏᴘᴇ `/cancel` ᴛᴏ ᴀʙᴏʀᴛ)*")
+    await event.respond("📢 **𝐀ᴅᴍɪɴ 𝐒ᴜᴍᴍᴏɴ 𝐌ᴏᴅᴇ**\n\n𝐒ᴇɴᴅ ᴛʜᴇ 𝐆𝐂 ᴏʀ ᴄʜᴀɴɴᴇʟ ʟɪɴᴋ ᴛᴏ ꜱᴜᴍᴍᴏɴ **𝐀𝐋𝐋** ʙᴏᴛꜱ.\n*(𝐓ʏᴘᴇ `/cancel` ᴛᴏ ᴀʙᴏʀᴛ)*")
 
 @controller_bot.on(events.CallbackQuery(data=b"user_summon_prompt"))
 async def user_summon_cb(event):
     user_id = event.sender_id
+    if not await check_force_join(user_id):
+        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
     login_states[user_id] = {"state": "WAITING_USER_SUMMON"}
     await event.answer()
-    await event.respond("📢 **𝐒ᴜᴍᴍᴏɴ 𝐌ᴏᴅᴇ**\n\n𝐒ᴇɴᴅ ᴛʜᴇ ɢᴄ ʟɪɴᴋ ᴛᴏ ꜱᴜᴍᴍᴏɴ **𝐘ᴏᴜʀ** ʙᴏᴛꜱ.\n*(ᴛʏᴘᴇ `/cancel` ᴛᴏ ᴀʙᴏʀᴛ)*")
+    await event.respond("📢 **𝐒ᴜᴍᴍᴏɴ 𝐌ᴏᴅᴇ**\n\n𝐒ᴇɴᴅ ᴛʜᴇ 𝐆𝐂 ᴏʀ ᴄʜᴀɴɴᴇʟ ʟɪɴᴋ ᴛᴏ ꜱᴜᴍᴍᴏɴ **ʏᴏᴜʀ** ʙᴏᴛꜱ.\n*(𝐓ʏᴘᴇ `/cancel` ᴛᴏ ᴀʙᴏʀᴛ)*")
 
 @controller_bot.on(events.CallbackQuery(data=b"admin_management"))
 async def admin_mgmt_callback(event):
     if event.sender_id not in ADMIN_USERS: return
     sessions = load_saved_sessions()
     if not sessions:
-        await event.edit("📭 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ꜱᴇꜱꜱɪᴏɴꜱ ꜰᴏᴜɴᴅ.", buttons=[[color_button("🔙 𝐁ᴀᴄᴋ", b"back_to_main", style="danger")]])
+        await event.edit("📭 𝐍ᴏ ᴀᴄᴄᴏᴜɴᴛꜱ ʜᴏꜱᴛᴇᴅ.", buttons=[[c_inline("🔙 𝐁ᴀᴄᴋ", b"back_to_main", color="blue")]])
         return
-
+        
     buttons = []
     for s in sessions:
         s_name = s.get("session_name")
-        status_emoji = "🟢" if s_name in manager.active_clients else "🔴"
-        buttons.append([
-            color_button(f"{status_emoji} {s.get('name')} ({s_name})", f"manage_{s_name}".encode(), style="primary")
-        ])
-    buttons.append([color_button("🔙 𝐁ᴀᴄᴋ", b"back_to_main", style="danger")])
-    await event.edit("🛠 **𝐀ᴅᴍɪɴ 𝐌ᴀɴᴀɢᴇᴍᴇɴᴛ**", buttons=buttons)
+        is_online = s_name in manager.active_clients
+        status_emoji = "🟢" if is_online else "🔴"
+        btn_color = "green" if is_online else "red"
+        buttons.append([c_inline(f"{status_emoji} {s.get('name')} ({s_name})", f"manage_{s_name}".encode(), color=btn_color)])
+    buttons.append([c_inline("🔙 𝐁ᴀᴄᴋ", b"back_to_main", color="blue")])
+    await event.edit(
+        "╔═══════════════════════════╗\n"
+        "   🛠 **𝐀𝐃𝐌𝐈𝐍 𝐌𝐀𝐍𝐀𝐆𝐄𝐌𝐄𝐍𝐓** 🛠\n"
+        "╚═══════════════════════════╝",
+        buttons=buttons
+    )
 
 @controller_bot.on(events.CallbackQuery(pattern=rb"manage_(rebel_session\d+)"))
 async def manage_acc_callback(event):
@@ -1413,33 +1415,35 @@ async def manage_acc_callback(event):
     s_name = event.data.decode().split("_", 1)[1]
     sessions = load_saved_sessions()
     session_data = next((s for s in sessions if s.get("session_name") == s_name), None)
-
+    
     if not session_data:
         return await event.answer("𝐒ᴇꜱꜱɪᴏɴ ɴᴏᴛ ꜰᴏᴜɴᴅ!", alert=True)
-
+        
     is_owner = session_data.get("host_user_id") == user_id
     is_admin = user_id in ADMIN_USERS
-
+    
     if not (is_owner or is_admin):
         return await event.answer("❌ 𝐔ɴᴀᴜᴛʜᴏʀɪᴢᴇᴅ.", alert=True)
-
+        
     is_active = s_name in manager.active_clients
     status = "🟢 𝐀ᴄᴛɪᴠᴇ" if is_active else "🔴 𝐃ɪꜱᴄᴏɴɴᴇᴄᴛᴇᴅ"
-
+    
     text = (
-        f"🛠 **𝐌ᴀɴᴀɢᴇ 𝐒ᴇꜱꜱɪᴏɴ**\n\n"
-        f"👤 **𝐍ᴀᴍᴇ:** {session_data.get('name')}\n"
-        f"🔑 **𝐒ᴇꜱꜱɪᴏɴ:** `{s_name}`\n"
-        f"📊 **𝐒ᴛᴀᴛᴜꜱ:** {status}"
+        "╔═══════════════════════════╗\n"
+        "   🛠 **𝐌𝐀𝐍𝐀𝐆𝐄 𝐀𝐂𝐂𝐎𝐔𝐍𝐓** 🛠\n"
+        "╚═══════════════════════════╝\n\n"
+        f"╭─ 👤 **𝐍ᴀᴍᴇ:** {session_data.get('name')}\n"
+        f"├─ 🔑 **𝐒ᴇꜱꜱɪᴏɴ:** `{s_name}`\n"
+        f"╰─ 📊 **𝐒ᴛᴀᴛᴜꜱ:** {status}"
     )
-
+    
     buttons = [
-        [color_button("🔌 𝐃ɪꜱᴄᴏɴɴᴇᴄᴛ", f"stop_{s_name}".encode(), style="danger")],
-        [color_button("🗑️ 𝐃ᴇʟᴇᴛᴇ & 𝐋ᴏɢᴏᴜᴛ", f"del_{s_name}".encode(), style="danger")]
+        [c_inline("🔌 𝐃ɪꜱᴄᴏɴɴᴇᴄᴛ", f"stop_{s_name}".encode(), color="blue")],
+        [c_inline("🗑️ 𝐋ᴏɢᴏᴜᴛ & 𝐃ᴇʟᴇᴛᴇ", f"del_{s_name}".encode(), color="red")]
     ]
-
+    
     back_data = b"admin_management" if (is_admin and not is_owner) else b"manage_host"
-    buttons.append([color_button("🔙 𝐁ᴀᴄᴋ", back_data, style="primary")])
+    buttons.append([c_inline("🔙 𝐁ᴀᴄᴋ", back_data, color="green")])
     await event.edit(text, buttons=buttons)
 
 @controller_bot.on(events.CallbackQuery(pattern=rb"stop_(rebel_session\d+)"))
@@ -1448,12 +1452,12 @@ async def stop_acc_cb(event):
     s_name = event.data.decode().split("_", 1)[1]
     sessions = load_saved_sessions()
     session_data = next((s for s in sessions if s.get("session_name") == s_name), None)
-
+    
     if not session_data or (user_id not in ADMIN_USERS and session_data.get("host_user_id") != user_id):
         return await event.answer("𝐔ɴᴀᴜᴛʜᴏʀɪᴢᴇᴅ!", alert=True)
-
+        
     await manager.stop_account(s_name, remove_db=True, logout_telegram=False)
-    await event.answer(f"🔌 𝐃ɪꜱᴄᴏɴɴᴇᴄᴛᴇᴅ! {s_name} ɴᴏᴡ ᴏꜰꜰ.", alert=True)
+    await event.answer(f"🔌 𝐃ɪꜱᴄᴏɴɴᴇᴄᴛᴇᴅ! {s_name} ɪꜱ ꜰʀᴇᴇ.", alert=True)
     if user_id in ADMIN_USERS and session_data.get("host_user_id") != user_id:
         await admin_mgmt_callback(event)
     else:
@@ -1465,13 +1469,13 @@ async def del_acc_cb(event):
     s_name = event.data.decode().split("_", 1)[1]
     sessions = load_saved_sessions()
     session_data = next((s for s in sessions if s.get("session_name") == s_name), None)
-
+    
     if not session_data or (user_id not in ADMIN_USERS and session_data.get("host_user_id") != user_id):
         return await event.answer("𝐔ɴᴀᴜᴛʜᴏʀɪᴢᴇᴅ!", alert=True)
-
+        
     await manager.stop_account(s_name, remove_db=True, logout_telegram=True)
-    await event.answer(f"🗑️ 𝐃ᴇʟᴇᴛᴇᴅ! {s_name} ɴᴏᴡ ɢᴏɴᴇ.", alert=True)
-
+    await event.answer(f"🗑️ 𝐃ᴇʟᴇᴛᴇᴅ! {s_name} ɪꜱ ꜰʀᴇᴇ.", alert=True)
+    
     if user_id in ADMIN_USERS and session_data.get("host_user_id") != user_id:
         await admin_mgmt_callback(event)
     else:
@@ -1484,6 +1488,7 @@ async def unified_state_machine(event):
 
     if user_id not in login_states: return
 
+    # Universal cancellation handler preventing logic lock-in
     if text.lower() == "/cancel":
         await event.respond("🚫 𝐂ᴀɴᴄᴇʟʟᴇᴅ.")
         if "client" in login_states[user_id]:
@@ -1492,39 +1497,15 @@ async def unified_state_machine(event):
         del login_states[user_id]
         return
 
+    # Ignore other incoming commands so they don't break the active state (e.g. treated as OTP)
     if text.startswith("/"): return
 
     state_data = login_states[user_id]
     state = state_data["state"]
 
-    if state == "WAITING_API_ID":
-        try:
-            api_id = int(text)
-            login_states[user_id]["api_id"] = api_id
-            login_states[user_id]["state"] = "WAITING_API_HASH"
-            await event.respond("🔑 **𝐒ᴛᴇᴘ 2/4:** 𝐄ɴᴛᴇʀ ʏᴏᴜʀ **API HASH** (ꜱᴛʀɪɴɢ).")
-        except ValueError:
-            await event.respond("❌ 𝐈ɴᴠᴀʟɪᴅ 𝐀𝐏𝐈 𝐈𝐃. 𝐏ʟᴇᴀꜱᴇ ꜱᴇɴᴅ ᴀ ɴᴜᴍʙᴇʀ.")
-
-    elif state == "WAITING_API_HASH":
-        api_hash = text.strip()
-        api_id = state_data["api_id"]
-        save_credentials(user_id, api_id, api_hash)
-        login_states[user_id]["api_hash"] = api_hash
-        login_states[user_id]["state"] = "WAITING_PHONE"
-        await event.respond("📱 **𝐒ᴛᴇᴘ 3/4:** 𝐄ɴᴛᴇʀ ʏᴏᴜʀ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ ɪɴ ɪɴᴛᴇʀɴᴀᴛɪᴏɴᴀʟ ꜰᴏʀᴍᴀᴛ.\n*(ᴇxᴀᴍᴘʟᴇ: +919876543210)*")
-
-    elif state == "WAITING_PHONE":
+    if state == "WAITING_PHONE":
         phone = text
-        creds = get_credentials(user_id)
-        if creds:
-            api_id = creds["api_id"]
-            api_hash = creds["api_hash"]
-        else:
-            api_id = API_ID
-            api_hash = API_HASH
-
-        client = TelegramClient(StringSession(), api_id, api_hash)
+        client = TelegramClient(StringSession(), API_ID, API_HASH)
         await client.connect()
         try:
             code_req = await client.send_code_request(phone)
@@ -1532,9 +1513,9 @@ async def unified_state_machine(event):
                 "state": "WAITING_OTP", "phone": phone,
                 "phone_code_hash": code_req.phone_code_hash, "client": client
             })
-            await event.respond("📩 **𝐒ᴛᴇᴘ 4/4:** 𝐄ɴᴛᴇʀ ᴛʜᴇ OTP ʀᴇᴄᴇɪᴠᴇᴅ.\n*(ᴇxᴀᴍᴘʟᴇ: 1 2 3 4 5)*")
+            await event.respond("📩 **𝐒ᴛᴇᴘ 𝟐:** 𝐄ɴᴛᴇʀ 𝐎𝐓𝐏 ᴡɪᴛʜ ꜱᴘᴀᴄᴇꜱ.\n*(𝐄xᴀᴍᴘʟᴇ: 1 2 3 4 5)*")
         except Exception as e:
-            await event.respond(f"❌ 𝐃ᴏʀᴇ ᴇʀʀᴏʀ: `{e}`")
+            await event.respond(f"❌ 𝐅ᴀɪʟᴇᴅ: `{e}`")
             await client.disconnect()
             del login_states[user_id]
 
@@ -1546,12 +1527,10 @@ async def unified_state_machine(event):
 
         try:
             await client.sign_in(phone=phone, code=otp, phone_code_hash=hash_code)
-            api_id = state_data.get("api_id")
-            api_hash = state_data.get("api_hash")
-            await finalize_login(user_id, client, event, api_id, api_hash)
+            await finalize_login(user_id, client, event)
         except SessionPasswordNeededError:
             login_states[user_id]["state"] = "WAITING_2FA"
-            await event.respond("🔐 **𝐒ᴛᴇᴘ 5:** 𝐄ɴᴛᴇʀ ʏᴏᴜʀ 2FA ᴘᴀꜱꜱᴡᴏʀᴅ:")
+            await event.respond("🔒 **𝐒ᴛᴇᴘ 𝟑:** 𝐄ɴᴛᴇʀ 𝟐𝐅𝐀 ᴘᴀꜱꜱᴡᴏʀᴅ:")
         except (PhoneCodeInvalidError, PhoneCodeExpiredError):
             await event.respond("❌ 𝐈ɴᴠᴀʟɪᴅ ᴄᴏᴅᴇ.")
             await client.disconnect()
@@ -1565,18 +1544,16 @@ async def unified_state_machine(event):
         client = state_data["client"]
         try:
             await client.sign_in(password=text)
-            api_id = state_data.get("api_id")
-            api_hash = state_data.get("api_hash")
-            await finalize_login(user_id, client, event, api_id, api_hash)
+            await finalize_login(user_id, client, event)
         except PasswordHashInvalidError:
-            await event.respond("❌ 𝐈ɴᴄᴏʀʀᴇᴄᴛ 2FA ᴘᴀꜱꜱᴡᴏʀᴅ.")
+            await event.respond("❌ 𝐈ɴᴄᴏʀʀᴇᴄᴛ 𝟐𝐅𝐀 ᴘᴀꜱꜱᴡᴏʀᴅ.")
             await client.disconnect()
             del login_states[user_id]
         except Exception as e:
             await event.respond(f"❌ 𝐄ʀʀᴏʀ: `{e}`")
             await client.disconnect()
             del login_states[user_id]
-
+            
     elif state == "WAITING_BROADCAST":
         users = get_bot_users()
         status_msg = await event.respond(f"⏳ 𝐁ʀᴏᴀᴅᴄᴀꜱᴛɪɴɢ ᴛᴏ {len(users)} ᴜꜱᴇʀꜱ...")
@@ -1585,9 +1562,9 @@ async def unified_state_machine(event):
             try:
                 await controller_bot.send_message(uid, event.message)
                 success += 1
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.1) 
             except: pass
-
+        
         await status_msg.edit(f"✅ **𝐁ʀᴏᴀᴅᴄᴀꜱᴛ 𝐂ᴏᴍᴘʟᴇᴛᴇ!** ({success}/{len(users)})")
         del login_states[user_id]
 
@@ -1595,7 +1572,7 @@ async def unified_state_machine(event):
         status_msg = await event.respond(f"⏳ 𝐒ᴜᴍᴍᴏɴɪɴɢ ᴀʟʟ ʙᴏᴛꜱ...")
         success = 0
         total = len(manager.active_clients)
-
+        
         for s_name, client in list(manager.active_clients.items()):
             try:
                 await join_chat_by_link(client, text)
@@ -1603,7 +1580,7 @@ async def unified_state_machine(event):
                 await asyncio.sleep(0.5)
             except Exception:
                 pass
-
+                
         await status_msg.edit(f"✅ **𝐒ᴜᴍᴍᴏɴ 𝐂ᴏᴍᴘʟᴇᴛᴇ!** ({success}/{total} ʙᴏᴛꜱ)")
         del login_states[user_id]
 
@@ -1611,11 +1588,11 @@ async def unified_state_machine(event):
         sessions = load_saved_sessions()
         user_session_names = {s.get("session_name") for s in sessions if s.get("host_user_id") == user_id}
         target_clients = {name: client for name, client in manager.active_clients.items() if name in user_session_names}
-
+        
         status_msg = await event.respond(f"⏳ 𝐒ᴜᴍᴍᴏɴɪɴɢ ʏᴏᴜʀ ʙᴏᴛꜱ...")
         success = 0
         total = len(target_clients)
-
+        
         for s_name, client in target_clients.items():
             try:
                 await join_chat_by_link(client, text)
@@ -1623,46 +1600,47 @@ async def unified_state_machine(event):
                 await asyncio.sleep(0.5)
             except Exception:
                 pass
-
+                
         await status_msg.edit(f"✅ **𝐒ᴜᴍᴍᴏɴ 𝐂ᴏᴍᴘʟᴇᴛᴇ!** ({success}/{total} ʙᴏᴛꜱ)")
         del login_states[user_id]
-
+        
     elif state == "WAITING_PREMIUM_ADD":
         try:
             target_id = int(text)
             add_premium_user(target_id)
-            await event.respond(f"✅ `{target_id}` ɴᴏᴡ **𝐏ʀᴇᴍɪᴜᴍ**!")
-        except ValueError: await event.respond("❌ 𝐈ɴᴠᴀʟɪᴅ 𝐔𝐬𝐞𝐫 𝐈𝐃.")
+            await event.respond(f"✅ `{target_id}` ɪꜱ ɴᴏᴡ **𝐏ʀᴇᴍɪᴜᴍ**!")
+        except ValueError: await event.respond("❌ 𝐈ɴᴠᴀʟɪᴅ 𝐔ꜱᴇʀ 𝐈𝐃.")
         del login_states[user_id]
-
+        
     elif state == "WAITING_PREMIUM_REMOVE":
         try:
             target_id = int(text)
             remove_premium_user(target_id)
-            await event.respond(f"✅ `{target_id}` ʀᴇᴍᴏᴠᴇᴅ ꜰʀᴏᴍ ᴘʀᴇᴍɪᴜᴍ.")
-        except ValueError: await event.respond("❌ 𝐈ɴᴠᴀʟɪᴅ 𝐔𝐬𝐞𝐫 𝐈𝐃.")
+            await event.respond(f"✅ `{target_id}` ʀᴇᴍᴏᴠᴇᴅ ꜰʀᴏᴍ 𝐏ʀᴇᴍɪᴜᴍ.")
+        except ValueError: await event.respond("❌ 𝐈ɴᴠᴀʟɪᴅ 𝐔ꜱᴇʀ 𝐈𝐃.")
         del login_states[user_id]
 
 @controller_bot.on(events.CallbackQuery(data=b"admin_status"))
 async def admin_status_callback(event):
     if event.sender_id not in ADMIN_USERS: return
-    await event.answer("𝐃ᴇʟᴀʏɪɴɢ...")
+    await event.answer("𝐅ᴇᴛᴄʜɪɴɢ...")
     start_time = time.time()
-    await controller_bot.get_me()
+    await controller_bot.get_me() 
     ping = round((time.time() - start_time) * 1000, 2)
-
-    users_count = len(get_bot_users())
-    sessions = load_saved_sessions()
-    active_count = len(manager.active_clients)
-    prem_count = len(get_premium_users())
+    
+    users_count, sessions, active_count, prem_count = len(get_bot_users()), load_saved_sessions(), len(manager.active_clients), len(get_premium_users())
     text = (
-        "📊 **𝐒ᴛᴀᴛᴜꜱ 𝐃ᴀꜱʜʙᴏᴀʀᴅ**\n\n"
-        f"👥 **𝐔ꜱᴇʀꜱ:** `{users_count}`\n"
-        f"💎 **𝐏ʀᴇᴍɪᴜᴍ:** `{prem_count}`\n"
-        f"🤖 **𝐇ᴏꜱᴛᴇᴅ:** `{len(sessions)}` (🟢 `{active_count}`)\n"
-        f"⚡ **𝐏ɪɴɢ:** `{ping} ᴍꜱ`"
+        "╔═══════════════════════════╗\n"
+        "   📊 **𝐒𝐘𝐒𝐓𝐄𝐌 𝐒𝐓𝐀𝐓𝐔𝐒** 📊\n"
+        "╚═══════════════════════════╝\n\n"
+        "╭───────────────────────────╮\n"
+        f"┃ 👥 **𝐔ꜱᴇʀꜱ:** `{users_count}`\n"
+        f"┃ 💎 **𝐏ʀᴇᴍɪᴜᴍ:** `{prem_count}`\n"
+        f"┃ 🤖 **𝐇ᴏꜱᴛᴇᴅ:** `{len(sessions)}` (🟢 `{active_count}`)\n"
+        f"┃ ⚡ **𝐏ɪɴɢ:** `{ping} ᴍꜱ`\n"
+        "╰───────────────────────────╯"
     )
-    await event.edit(text, buttons=[[color_button("🔙 𝐁ᴀᴄᴋ", b"back_to_main", style="primary")]])
+    await event.edit(text, buttons=[[c_inline("🔙 𝐁ᴀᴄᴋ", b"back_to_main", color="blue")]])
 
 @controller_bot.on(events.CallbackQuery(data=b"admin_broadcast"))
 async def admin_broadcast_callback(event):
@@ -1676,29 +1654,34 @@ async def admin_premium_callback(event):
     if event.sender_id not in ADMIN_USERS: return
     buttons = [
         [
-            color_button("➕ 𝐀ᴅᴅ", b"prem_add", style="success"),
-            color_button("➖ 𝐑ᴇᴍᴏᴠᴇ", b"prem_rem", style="danger")
+            c_inline("➕ 𝐀ᴅᴅ", b"prem_add", color="green"),
+            c_inline("➖ 𝐑ᴇᴍᴏᴠᴇ", b"prem_rem", color="red")
         ],
         [
-            color_button("📋 𝐋ɪꜱᴛ", b"prem_list", style="primary"),
-            color_button("🔙 𝐁ᴀᴄᴋ", b"back_to_main", style="danger")
+            c_inline("📋 𝐋ɪꜱᴛ", b"prem_list", color="blue"),
+            c_inline("🔙 𝐁ᴀᴄᴋ", b"back_to_main", color="blue")
         ]
     ]
-    await event.edit("💎 **𝐏ʀᴇᴍɪᴜᴍ 𝐌ᴀɴᴀɢᴇᴍᴇɴᴛ**", buttons=buttons)
+    await event.edit(
+        "╔═══════════════════════════╗\n"
+        "   💎 **𝐏𝐑𝐄𝐌𝐈𝐔𝐌 𝐌𝐀𝐍𝐀𝐆𝐄𝐌𝐄𝐍𝐓** 💎\n"
+        "╚═══════════════════════════╝",
+        buttons=buttons
+    )
 
 @controller_bot.on(events.CallbackQuery(data=b"prem_add"))
 async def prem_add_cb(event):
     if event.sender_id not in ADMIN_USERS: return
     login_states[event.sender_id] = {"state": "WAITING_PREMIUM_ADD"}
     await event.answer()
-    await event.respond("➕ 𝐒ᴇɴᴅ ᴜꜱᴇʀ 𝐈𝐃 ᴛᴏ ɢʀᴀɴᴛ ᴘʀᴇᴍɪᴜᴍ.")
+    await event.respond("➕ 𝐒ᴇɴᴅ 𝐔ꜱᴇʀ 𝐈𝐃 ᴛᴏ ɢʀᴀɴᴛ 𝐏ʀᴇᴍɪᴜᴍ.")
 
 @controller_bot.on(events.CallbackQuery(data=b"prem_rem"))
 async def prem_rem_cb(event):
     if event.sender_id not in ADMIN_USERS: return
     login_states[event.sender_id] = {"state": "WAITING_PREMIUM_REMOVE"}
     await event.answer()
-    await event.respond("➖ 𝐒ᴇɴᴅ ᴜꜱᴇʀ 𝐈𝐃 ᴛᴏ ʀᴇᴍᴏᴠᴇ ᴘʀᴇᴍɪᴜᴍ.")
+    await event.respond("➖ 𝐒ᴇɴᴅ 𝐔ꜱᴇʀ 𝐈𝐃 ᴛᴏ ʀᴇᴍᴏᴠᴇ 𝐏ʀᴇᴍɪᴜᴍ.")
 
 @controller_bot.on(events.CallbackQuery(data=b"prem_list"))
 async def prem_list_cb(event):
@@ -1715,15 +1698,15 @@ async def prem_list_cb(event):
 async def admin_reset_callback(event):
     if event.sender_id not in ADMIN_USERS: return
     status_msg = await event.respond("🔄 𝐑ᴇꜱᴇᴛᴛɪɴɢ ꜱᴇʀᴠᴇʀ...")
-
+    
     for s_name in list(manager.active_clients.keys()):
         await manager.stop_account(s_name, remove_db=True)
-
-    for file_path in [SESSIONS_FILE, USERS_FILE, PREMIUM_FILE, CREDENTIALS_FILE]:
+        
+    for file_path in [SESSIONS_FILE, USERS_FILE, PREMIUM_FILE]:
         if os.path.exists(file_path):
             try: os.remove(file_path)
             except: pass
-
+                
     manager.active_rebel_loops.clear()
     login_states.clear()
     await status_msg.edit("✅ **𝐒ᴇʀᴠᴇʀ 𝐑ᴇꜱᴇᴛ 𝐂ᴏᴍᴘʟᴇᴛᴇ!**")
@@ -1732,6 +1715,7 @@ async def main():
     print("🚀 𝐒ᴛᴀʀᴛɪɴɢ 𝐂ᴏɴᴛʀᴏʟʟᴇʀ 𝐁ᴏᴛ...")
     await controller_bot.start(bot_token=BOT_TOKEN)
 
+    # FIXED: Register persistent menu button using functions.bots.SetBotCommandsRequest
     try:
         await controller_bot(functions.bots.SetBotCommandsRequest(
             scope=types.BotCommandScopeDefault(),
@@ -1739,14 +1723,14 @@ async def main():
             commands=[types.BotCommand(command='start', description='Open Rebel Hoster Panel')]
         ))
     except Exception as e:
-        print(f"⚠️ 𝐂ᴏᴜʟᴅ ɴᴏᴛ ꜱᴇᴛ ʟᴏɢɪɴ ɢᴜɪᴅᴇ: {e}")
+        print(f"⚠️ 𝐂ᴏᴜʟᴅ ɴᴏᴛ ꜱᴇᴛ ʙᴏᴛ ᴄᴏᴍᴍᴀɴᴅꜱ: {e}")
 
     saved = load_saved_sessions()
-    print(f"📦 𝐋ᴏᴀᴅᴇᴅ {len(saved)} ꜱᴇꜱꜱɪᴏɴꜱ.")
+    print(f"📦 𝐅ᴏᴜɴᴅ {len(saved)} ᴀᴄᴄᴏᴜɴᴛꜱ.")
     for s in saved:
         await manager.start_account(s["session"], s["session_name"])
 
-    print("🤖 𝐀ʟʟ ꜱʏꜱᴛᴇᴍꜱ ᴀᴄᴛɪᴠᴇ.")
+    print("🤖 𝐀ʟʟ ᴄᴏᴍᴘᴏɴᴇɴᴛꜱ ᴀᴄᴛɪᴠᴇ.")
     await controller_bot.run_until_disconnected()
 
 if __name__ == "__main__":
