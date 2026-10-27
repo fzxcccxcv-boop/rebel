@@ -56,6 +56,8 @@ USERS_FILE = "bot_users.json"
 PREMIUM_FILE = "premium_users.json"
 
 # ── COLOURED INLINE BUTTON BUILDERS (GREEN / RED / BLUE) ─────────────────────
+from telethon.tl import types as tl_types
+
 BUTTON_STYLE_MAP = {
     "green": "success",
     "red": "danger",
@@ -63,32 +65,32 @@ BUTTON_STYLE_MAP = {
 }
 
 def c_inline(text: str, data: bytes, color: str = "blue"):
-    """Creates a real Green, Red, or Blue inline callback button."""
+    """Creates a Green, Red, or Blue inline callback button safely."""
     c = color.lower()
     style_val = BUTTON_STYLE_MAP.get(c, c)
     for kw in ({"color": c}, {"style": style_val}, {"style": c}):
         try:
             return Button.inline(text, data, **kw)
-        except TypeError:
+        except (TypeError, AttributeError):
             pass
         try:
-            return types.KeyboardButtonCallback(text=text, data=data, **kw)
-        except TypeError:
+            return tl_types.KeyboardButtonCallback(text=text, data=data, **kw)
+        except (TypeError, AttributeError):
             pass
     return Button.inline(text, data)
 
 def c_url(text: str, url: str, color: str = "blue"):
-    """Creates a real Green, Red, or Blue inline URL button."""
+    """Creates a Green, Red, or Blue inline URL button safely."""
     c = color.lower()
     style_val = BUTTON_STYLE_MAP.get(c, c)
     for kw in ({"color": c}, {"style": style_val}, {"style": c}):
         try:
             return Button.url(text, url, **kw)
-        except TypeError:
+        except (TypeError, AttributeError):
             pass
         try:
-            return types.KeyboardButtonUrl(text=text, url=url, **kw)
-        except TypeError:
+            return tl_types.KeyboardButtonUrl(text=text, url=url, **kw)
+        except (TypeError, AttributeError):
             pass
     return Button.url(text, url)
 
