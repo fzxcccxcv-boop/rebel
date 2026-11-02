@@ -39,11 +39,9 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     for _ in range(10):
         try:
-            # use_reloader=False is required for background threads on Windows
             app.run(host='0.0.0.0', port=port, use_reloader=False)
             break
         except OSError as e:
-            # 98: Linux, 48: macOS, 10048: Windows WSAEADDRINUSE
             if "Address already in use" in str(e) or (hasattr(e, 'errno') and e.errno in (98, 48, 10048)):
                 print(f"Port {port} is in use, trying port {port + 1}...")
                 port += 1
@@ -89,18 +87,18 @@ TIER_RESOURCE_LIMITS = {
     'admin': {'ram_mb': 1024, 'cpu_pct': 95.0}
 }
 
-CPU_OVERLOAD_STRIKES_LIMIT = 4              # Consecutive high-CPU checks before termination
-MAX_AUTO_RESTART_CRASHES = 5                # Max consecutive auto-restarts before disabling
-MAX_ZIP_EXTRACTED_SIZE = 100 * 1024 * 1024  # 100 MB Zip-Bomb cap
+CPU_OVERLOAD_STRIKES_LIMIT = 4
+MAX_AUTO_RESTART_CRASHES = 5
+MAX_ZIP_EXTRACTED_SIZE = 100 * 1024 * 1024
 DOCKER_BIN = shutil.which('docker') or shutil.which('docker.exe')
-USE_DOCKER_SANDBOX = False                  # Can be toggled live from Owner Panel
+USE_DOCKER_SANDBOX = False
 
 os.makedirs(UPLOAD_BOTS_DIR, exist_ok=True)
 os.makedirs(IROTECH_DIR, exist_ok=True)
 
 bot = telebot.TeleBot(TOKEN)
 
-# --- Module Aliases Dictionary (Defined Early) ---
+# --- Module Aliases Dictionary ---
 TELEGRAM_MODULES = {
     'telebot': 'pyTelegramBotAPI', 'telegram': 'python-telegram-bot', 'python_telegram_bot': 'python-telegram-bot',
     'aiogram': 'aiogram', 'pyrogram': 'pyrogram', 'telethon': 'telethon', 'telethon.sync': 'telethon',
@@ -123,26 +121,25 @@ username_to_id = {}
 bot_locked = False
 pending_approvals = {}
 script_security_reports = {}
-auto_restart_scripts = set()     # Stores script_keys ("{user_id}_{file_name}") with Auto-Restart ON
-crash_restart_counts = {}        # Tracks crash counts per script_key
-terminal_sessions = {}           # [TERMINAL] user_id -> True when terminal session is active
+auto_restart_scripts = set()
+crash_restart_counts = {}
+terminal_sessions = {}  # [TERMINAL]
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Node and NPM executable resolution for Windows
 NODE_BIN = shutil.which('node') or shutil.which('node.exe') or 'node'
 NPM_BIN = shutil.which('npm') or shutil.which('npm.cmd') or ('npm.cmd' if os.name == 'nt' else 'npm')
 
-# --- Command Button Layouts ---
-COMMAND_BUTTONS_LAYOUT_USER_SPEC = [          # [TERMINAL] added
+# --- Command Button Layouts (with Terminal) ---
+COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
     ["📢 Updates Channel"],
     ["📤 Upload File", "📂 Check Files"],
     ["🖥️ Terminal"],
     ["⚡ Bot Speed", "📊 Statistics"],
     ["📤 Send Command", "📞 Contact Owner"]
 ]
-ADMIN_COMMAND_BUTTONS_LAYOUT_USER_SPEC = [    # [TERMINAL] added
+ADMIN_COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
     ["📢 Updates Channel"],
     ["📤 Upload File", "📂 Check Files"],
     ["🖥️ Terminal"],
@@ -153,12 +150,8 @@ ADMIN_COMMAND_BUTTONS_LAYOUT_USER_SPEC = [    # [TERMINAL] added
     ["👑 Owner Panel", "📞 Contact Owner"]
 ]
 
-# --- Colorful Inline Button Helper (Telegram Bot API 9.4+ / 2026 Support) ---
+# --- Colorful Inline Button Helper ---
 def colorful_btn(text, callback_data=None, url=None, style=None):
-    """
-    Creates an InlineKeyboardButton and attaches the Telegram Bot API `style`
-    property ('primary' = Blue, 'success' = Green, 'danger' = Red) for colorful buttons.
-    """
     btn = types.InlineKeyboardButton(text, callback_data=callback_data, url=url)
     if style:
         btn.style = style
@@ -172,19 +165,11 @@ def _patched_btn_to_dict(self):
     return data
 types.InlineKeyboardButton.to_dict = _patched_btn_to_dict
 
-# --- AST Static Security Scanner & Zip-Slip Protection ---
-HIGH_RISK_PY_CALLS = {
-    'eval', 'exec', 'compile', '__import__'
-}
+# --- AST Static Security Scanner ---
+HIGH_RISK_PY_CALLS = {'eval', 'exec', 'compile', '__import__'}
 SENSITIVE_PATTERNS = [
-    r'bot_data\.db',
-    r'upload_bots',
-    r'8964561893:',  # Protecting host bot token
-    r'rm\s+-rf\s+/',
-    r'format\s+[a-zA-Z]:',
-    r'del\s+/[fFsS]',
-    r'nc\s+-e',
-    r'/dev/tcp/'
+    r'bot_data\.db', r'upload_bots', r'8964561893:', r'rm\s+-rf\s+/',
+    r'format\s+[a-zA-Z]:', r'del\s+/[fFsS]', r'nc\s+-e', r'/dev/tcp/'
 ]
 
 class PythonASTSecurityVisitor(ast.NodeVisitor):
@@ -235,10 +220,6 @@ class PythonASTSecurityVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 def scan_script_security(file_path, file_type='py'):
-    """
-    Runs AST static security analysis on Python scripts and pattern scanning on JS/Py files.
-    Returns (is_safe_for_user, risk_level, issues_list)
-    """
     issues = []
     critical = False
     try:
@@ -271,7 +252,6 @@ def scan_script_security(file_path, file_type='py'):
                     issues.append(msg)
                     if "CRITICAL" in msg:
                         critical = True
-
     except Exception as e:
         issues.append(f"⚠️ Could not complete scan: {e}")
 
@@ -285,22 +265,16 @@ def scan_script_security(file_path, file_type='py'):
     return (not critical), risk_level, issues[:8]
 
 def safe_extract_zip(zip_path, extract_to):
-    """
-    Safely extracts a ZIP archive preventing Zip-Slip path traversal and Zip-Bomb attacks.
-    """
     total_uncompressed = 0
     abs_extract_to = os.path.abspath(extract_to)
-
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         for member in zip_ref.infolist():
             total_uncompressed += member.file_size
             if total_uncompressed > MAX_ZIP_EXTRACTED_SIZE:
                 raise ValueError(f"Archive exceeds maximum uncompressed limit ({MAX_ZIP_EXTRACTED_SIZE // (1024*1024)} MB).")
-
             member_path = os.path.abspath(os.path.join(abs_extract_to, member.filename))
             if not member_path.startswith(abs_extract_to + os.sep) and member_path != abs_extract_to:
                 raise ValueError(f"Zip-Slip path traversal blocked: {member.filename}")
-
         zip_ref.extractall(abs_extract_to)
 
 # --- Windows Safe File Helpers ---
@@ -436,9 +410,8 @@ def load_data():
 init_db()
 load_data()
 
-# --- Tier Resource Limit & DB Persistence Helpers ---
+# --- Tier Resource Helpers ---
 def get_user_resource_limits(user_id):
-    """Returns (ram_mb, cpu_pct, tier_label) based on the user's tier."""
     if user_id == OWNER_ID:
         return float('inf'), 100.0, "👑 Owner (Unlimited)"
     if user_id in admin_ids:
@@ -517,20 +490,15 @@ def set_auto_restart_db(user_id, file_name, enabled):
         except Exception: pass
         finally: conn.close()
 
-# --- Owner Full Backup System (Database + All User Files) ---
+# --- Backup System ---
 SKIP_BACKUP_DIRS = {'node_modules', '__pycache__', '.git', 'venv', '.venv', 'env'}
 
 def build_backup_zip(zip_filepath, skip_logs=False):
-    """
-    Packages a safe SQLite snapshot of bot_data.db and all user scripts/files into zip_filepath.
-    Returns (user_folders_count, files_archived_count).
-    """
     temp_db_copy = zip_filepath + "_temp.db"
     files_archived = 0
     user_folders = set()
 
     try:
-        # 1. Perform safe online SQLite backup
         if os.path.exists(DATABASE_PATH):
             with DB_LOCK:
                 src_conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
@@ -541,7 +509,6 @@ def build_backup_zip(zip_filepath, skip_logs=False):
                     dst_conn.close()
                     src_conn.close()
 
-        # 2. Write database & user files into the ZIP archive
         with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
             if os.path.exists(temp_db_copy):
                 zf.write(temp_db_copy, arcname=os.path.join('inf', 'bot_data.db'))
@@ -569,7 +536,6 @@ def build_backup_zip(zip_filepath, skip_logs=False):
     return len(user_folders), files_archived
 
 def execute_owner_backup(chat_id):
-    """Runs in a background thread to build and send the full backup ZIP to the Owner."""
     temp_dir = None
     try:
         status_msg = bot.send_message(chat_id, "⏳ *Creating full backup of SQLite Database & all User Files...*", parse_mode='Markdown')
@@ -582,7 +548,6 @@ def execute_owner_backup(chat_id):
         zip_size_mb = os.path.getsize(zip_filepath) / (1024 * 1024)
         note_str = "Included (Full DB + Scripts + Logs)"
 
-        # Fallback if log files push the archive over Telegram's 50 MB Bot API limit
         if zip_size_mb > 49.0:
             safe_remove(zip_filepath)
             user_folders_count, files_count = build_backup_zip(zip_filepath, skip_logs=True)
@@ -624,7 +589,6 @@ def safe_reply(message_obj, text, **kwargs):
             text = text[:3900] + "\n... (Message truncated)"
         chat_id = getattr(getattr(message_obj, 'chat', None), 'id', None)
         msg_id = getattr(message_obj, 'message_id', None)
-
         if msg_id and chat_id:
             return bot.reply_to(message_obj, text, **kwargs)
         elif chat_id:
@@ -691,14 +655,11 @@ def is_bot_running(script_owner_id, file_name):
     script_info = bot_scripts.get(script_key)
     if not script_info:
         return False
-
     process = script_info.get('process')
     if not process:
         return False
-
     if process.poll() is not None:
         return False
-
     try:
         proc = psutil.Process(process.pid)
         is_running = proc.is_running() and (not hasattr(psutil, 'STATUS_ZOMBIE') or proc.status() != psutil.STATUS_ZOMBIE)
@@ -749,9 +710,8 @@ def kill_process_tree(process_info):
     except Exception as e:
         logger.error(f"❌ Unexpected error killing process tree for PID {pid or 'N/A'} ({script_key}): {e}")
 
-# --- Process Resource Caps Watchdog & Auto-Restart Engine ---
+# --- Watchdog ---
 def get_process_tree_stats(pid):
-    """Returns total (memory_mb, cpu_percent, thread_count) for a process and all its children."""
     try:
         parent = psutil.Process(pid)
         procs = [parent] + parent.children(recursive=True)
@@ -770,11 +730,6 @@ def get_process_tree_stats(pid):
         return 0.0, 0.0, 0
 
 def resource_watchdog_loop():
-    """
-    Background daemon that:
-    1. Monitors crashed scripts and triggers Auto-Restart if enabled.
-    2. Enforces per-tier RAM and CPU caps on all running scripts.
-    """
     while True:
         try:
             for script_key, script_info in list(bot_scripts.items()):
@@ -929,7 +884,7 @@ def request_run_script(file_type, file_path, script_owner_id, user_folder, file_
     except Exception:
         safe_reply(message, "❌ Failed to request approval from Owner.")
 
-# --- Automatic Package Installation & Script Running ---
+# --- Package Installation & Script Running ---
 def run_pip_command(command_list):
     result = subprocess.run(command_list, capture_output=True, text=True, check=False, encoding='utf-8', errors='ignore')
     if result.returncode != 0 and 'externally-managed-environment' in (result.stderr or ''):
@@ -944,16 +899,13 @@ def attempt_install_pip(module_name, message):
     if package_name is None: return False
     try:
         safe_reply(message, f"🐍 Module `{module_name}` missing. Installing `{package_name}`...", parse_mode='Markdown')
-
         if module_name.lower() == 'telegram':
             run_pip_command([sys.executable, '-m', 'pip', 'uninstall', '-y', 'telegram'])
             command = [sys.executable, '-m', 'pip', 'install', '--force-reinstall', package_name]
         else:
             command = [sys.executable, '-m', 'pip', 'install', package_name]
-
         logger.info(f"Running install: {' '.join(command)}")
         result = run_pip_command(command)
-
         if result.returncode == 0:
             safe_reply(message, f"✅ Package `{package_name}` (for `{module_name}`) installed.", parse_mode='Markdown')
             return True
@@ -986,7 +938,6 @@ def attempt_install_npm(module_name, user_folder, message):
         return False
 
 def apply_os_resource_limits(pid):
-    """Applies lower CPU priority to child processes so user scripts cannot freeze the host."""
     try:
         p = psutil.Process(pid)
         if os.name == 'nt':
@@ -1363,7 +1314,7 @@ def remove_admin_db(admin_id):
         except Exception: return False
         finally: conn.close()
 
-# --- Menu Creation (Colorful Inline Buttons + Dedicated Owner Panel) ---
+# --- Menu Creation ---
 def create_main_menu_inline(user_id):
     markup = types.InlineKeyboardMarkup(row_width=2)
     buttons = [
@@ -1375,7 +1326,6 @@ def create_main_menu_inline(user_id):
         colorful_btn('📞 Contact Owner', url=f'https://t.me/{YOUR_USERNAME.replace("@", "")}', style='success')
     ]
 
-    # [TERMINAL] Add the terminal button in both branches
     term_btn = colorful_btn('🖥️ Terminal', callback_data='term_open', style='success')
 
     if user_id in admin_ids:
@@ -1389,7 +1339,7 @@ def create_main_menu_inline(user_id):
         ]
         markup.add(buttons[0])
         markup.add(buttons[1], buttons[2])
-        markup.add(term_btn)                                    # [TERMINAL]
+        markup.add(term_btn)
         markup.add(buttons[3], admin_buttons[0])
         markup.add(admin_buttons[1], admin_buttons[3])
         markup.add(admin_buttons[2], admin_buttons[5])
@@ -1405,7 +1355,7 @@ def create_main_menu_inline(user_id):
     else:
         markup.add(buttons[0])
         markup.add(buttons[1], buttons[2])
-        markup.add(term_btn)                                    # [TERMINAL]
+        markup.add(term_btn)
         markup.add(buttons[3])
         markup.add(buttons[4])
         markup.add(colorful_btn('📊 Statistics', callback_data='stats', style='primary'))
@@ -1481,7 +1431,6 @@ def create_admin_panel(user_id=None):
     return markup
 
 def create_owner_panel():
-    """Dedicated Owner Panel exclusively for OWNER_ID (Now with Backup DB & Files)."""
     markup = types.InlineKeyboardMarkup(row_width=2)
     docker_label = f"🐳 Docker Sandbox: {'ON' if USE_DOCKER_SANDBOX else 'OFF'}"
     markup.row(
@@ -1670,7 +1619,7 @@ def handle_py_file(file_path, script_owner_id, user_folder, file_name, message):
         request_run_script('py', file_path, script_owner_id, user_folder, file_name, message)
     except Exception as e: safe_reply(message, f"❌ Error processing Python file: {str(e)}")
 
-# --- Send Command and Enhanced Logs Functions ---
+# --- Send Command ---
 def _logic_send_command(message):
     user_id = message.from_user.id
     if bot_locked and user_id not in admin_ids:
@@ -2031,7 +1980,7 @@ def process_broadcast_message(message):
 
     safe_reply(message, f"📢 **Broadcast Complete!**\n\n✅ Sent: `{success_count}` users\n❌ Failed: `{fail_count}` users", parse_mode='Markdown')
 
-# --- Password Authentication System ---
+# --- Password Authentication ---
 def is_authenticated(user_id):
     if user_id == OWNER_ID or user_id in admin_ids: return True
     return user_id in authenticated_users
@@ -2060,7 +2009,6 @@ def handle_unauthenticated(message):
 @bot.callback_query_handler(func=lambda call: not is_authenticated(call.from_user.id))
 def auth_callback(call):
     bot.answer_callback_query(call.id, "🔒 Please enter the password in the chat to unlock the bot.", show_alert=True)
-# --------------------------------------
 
 # --- Command Handlers ---
 @bot.message_handler(commands=['start', 'help'])
@@ -2357,7 +2305,6 @@ def handle_callbacks(call):
         elif data == 'users_list': admin_required_callback(call, users_list_callback)
         elif data == 'factory_reset': owner_required_callback(call, factory_reset_callback)
         elif data == 'confirm_reset': owner_required_callback(call, confirm_reset_callback)
-        # [TERMINAL] — terminal callbacks
         elif data == 'term_open':  term_open_callback(call)
         elif data == 'term_close': term_close_callback(call)
         elif data == 'term_help':  term_help_callback(call)
@@ -2378,7 +2325,7 @@ def owner_required_callback(call, func_to_run):
         return
     func_to_run(call)
 
-# --- Owner Panel Callbacks (Backup, AST Customizer, Tier Caps, Global Controls) ---
+# --- Owner Panel Callbacks ---
 def owner_panel_callback(call):
     bot.answer_callback_query(call.id)
     f_cfg = TIER_RESOURCE_LIMITS['free']
@@ -2512,7 +2459,8 @@ def toggle_autorestart_callback(call):
     new_state = script_key not in auto_restart_scripts
     set_auto_restart_db(script_owner_id, file_name, new_state)
     bot.answer_callback_query(call.id, f"🔁 Auto-Restart {'ENABLED 🟢' if new_state else 'DISABLED 🔴'} for {file_name}")
- is_running = is_bot_running(script_owner_id, file_name)
+
+    is_running = is_bot_running(script_owner_id, file_name)
     status_text = '🟢 Running' if is_running else '🔴 Stopped'
     user_files_list = user_files.get(script_owner_id, [])
     file_type = next((f[1] for f in user_files_list if f[0] == file_name), '?')
@@ -2705,7 +2653,7 @@ def start_bot_callback(call):
     request_run_script(file_type, file_path, script_owner_id, user_folder, file_name, user_pseudo_msg, requesting_user_id=call.from_user.id)
     time.sleep(1)
 
-    is_now_running = is_bot_running(script_owner_id, file_name)
+       is_now_running = is_bot_running(script_owner_id, file_name)
     status_text = '🟢 Running' if is_now_running else '⏳ Pending / 🔴 Stopped'
     bot.edit_message_text(f"⚙️ Controls for: `{file_name}` ({file_type}) of User `{script_owner_id}`\nStatus: {status_text}",
         call.message.chat.id, call.message.message_id, reply_markup=create_control_buttons(script_owner_id, file_name, is_now_running), parse_mode='Markdown')
@@ -3089,7 +3037,6 @@ def auto_start_saved_scripts():
                 except Exception as e: logger.error(f"❌ Failed to auto-start {file_name} for {target_user_id}: {e}")
 
 def cleanup_on_exit():
-    """Terminate all active child processes on bot shutdown."""
     logger.info("🛑 Bot shutting down. Terminating active child processes...")
     for script_key, script_info in list(bot_scripts.items()):
         try:
