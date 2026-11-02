@@ -2512,18 +2512,12 @@ def toggle_autorestart_callback(call):
     new_state = script_key not in auto_restart_scripts
     set_auto_restart_db(script_owner_id, file_name, new_state)
     bot.answer_callback_query(call.id, f"🔁 Auto-Restart {'ENABLED 🟢' if new_state else 'DISABLED 🔴'} for {file_name}")
-
-    is_running = is_bot_running(script_owner_id, file_name)
+   is_running = is_bot_running(script_owner_id, file_name)
     status_text = '🟢 Running' if is_running else '🔴 Stopped'
     user_files_list = user_files.get(script_owner_id, [])
     file_type = next((f[1] for f in user_files_list if f[0] == file_name), '?')
     bot.edit_message_text(
-        f"⚙️ Controls for: `{file_name}` ({file_type}) of User `{script_owner_id}`\nStatus: {status_text}",
-        call.message.chat.id, call.message.message_id,
-        reply_markup=create_control_buttons(script_owner_id, file_name, is_running),
-        parse_mode='Markdown'
-    )
-        bot.edit_message_text(
+            bot.edit_message_text(
         f"⚙️ Controls for: `{file_name}` ({file_type}) of User `{script_owner_id}`\nStatus: {status_text}",
         call.message.chat.id, call.message.message_id,
         reply_markup=create_control_buttons(script_owner_id, file_name, is_running),
