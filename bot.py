@@ -2653,7 +2653,7 @@ def start_bot_callback(call):
     request_run_script(file_type, file_path, script_owner_id, user_folder, file_name, user_pseudo_msg, requesting_user_id=call.from_user.id)
     time.sleep(1)
 
-       is_now_running = is_bot_running(script_owner_id, file_name)
+       is_now_running = is_bot_running(script_owner_id, file_name
     status_text = '🟢 Running' if is_now_running else '⏳ Pending / 🔴 Stopped'
     bot.edit_message_text(f"⚙️ Controls for: `{file_name}` ({file_type}) of User `{script_owner_id}`\nStatus: {status_text}",
         call.message.chat.id, call.message.message_id, reply_markup=create_control_buttons(script_owner_id, file_name, is_now_running), parse_mode='Markdown')
