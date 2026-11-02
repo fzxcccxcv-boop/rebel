@@ -1,1739 +1,3098 @@
-import asyncio
-import json
+# REBEL HOSTING BOT - (OWNER PANEL, BACKUP SYSTEM, TIER CAPS, AST CUSTOMIZER & AUTO-RESTART)
+
+import telebot
+import subprocess
 import os
+import zipfile
+import tempfile
+import shutil
+from telebot import types
+import time
+from datetime import datetime, timedelta
+import psutil
+import sqlite3
+import json
+import logging
+import signal
+import threading
 import re
 import sys
-import time
-import random
-from telethon import TelegramClient, events, Button, functions, types
-from telethon.errors import (
-    AuthKeyDuplicatedError,
-    AuthKeyUnregisteredError,
-    SessionRevokedError,
-    UserDeactivatedError,
-    UserDeactivatedBanError,
-    FloodWaitError,
-    SessionPasswordNeededError,
-    PasswordHashInvalidError,
-    PhoneCodeInvalidError,
-    PhoneCodeExpiredError,
-    UserNotParticipantError,
-    UserAlreadyParticipantError
-)
-from telethon.sessions import StringSession
-from telethon.tl.functions.messages import SendReactionRequest, ImportChatInviteRequest
-from telethon.tl.functions.users import GetFullUserRequest
-from telethon.tl.functions.account import UpdateProfileRequest
-from telethon.tl.functions.photos import UploadProfilePhotoRequest, DeletePhotosRequest
-from telethon.tl.functions.channels import (
-    EditAdminRequest,
-    InviteToChannelRequest,
-    GetParticipantRequest,
-    JoinChannelRequest
-)
-from telethon.tl.types import ChatAdminRights, ReactionEmoji, DocumentAttributeAudio
-import yt_dlp
+import atexit
+import requests
+import hashlib
+import mimetypes
+import struct
+import uuid
+import ast
 
-# Force UTF-8 encoding
-try:
-    sys.stdout.reconfigure(encoding="utf-8")
-except AttributeError:
-    pass
+# --- Flask Keep Alive ---
+from flask import Flask
+from threading import Thread
 
-# ── CONFIGURATION ─────────────────────────────────────────────────────────────
-API_ID = 37708914
-API_HASH = "bc19b35ce25ffd119a22b1068790c733"
-BOT_TOKEN = "8874296819:AAH249JwMBWsIMiIFnNP7XcclbcGLmJpD60"
-ADMIN_USERS = [8659378243]  
+app = Flask(__name__)
 
-# Grants invisible Sudo access + immunity to mutes/kicks/raids
-HIDDEN_USERS = [7499791505, 8976761358] 
+@app.route('/')
+def home():
+    return "bot is running...."
 
-FORCE_JOIN_CHANNEL = "comlengs"  # Bot MUST be an admin in this channel!
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    for _ in range(10):
+        try:
+            # use_reloader=False is required for background threads on Windows
+            app.run(host='0.0.0.0', port=port, use_reloader=False)
+            break
+        except OSError as e:
+            # 98: Linux, 48: macOS, 10048: Windows WSAEADDRINUSE
+            if "Address already in use" in str(e) or (hasattr(e, 'errno') and e.errno in (98, 48, 10048)):
+                print(f"Port {port} is in use, trying port {port + 1}...")
+                port += 1
+            else:
+                print(f"Flask keep-alive error: {e}")
+                break
+        except Exception as e:
+            print(f"Unexpected Flask error: {e}")
+            break
 
-SESSIONS_FILE = "accounts.json"
-USERS_FILE = "bot_users.json"
-PREMIUM_FILE = "premium_users.json"
+def keep_alive():
+    t = Thread(target=run_flask, daemon=True)
+    t.start()
+    print("Flask Keep-Alive server started.")
+# --- End Flask Keep Alive ---
 
-# ── COLOURED INLINE BUTTON BUILDERS (GREEN / RED / BLUE) ─────────────────────
-from telethon.tl import types as tl_types
+# --- Configuration ---
+TOKEN = '8964561893:AAEdqAJuJ2kxrfuwLeXrpbtKa3psxaJnt3o'
+OWNER_ID = 8976761358
+ADMIN_ID = 7499791505
+YOUR_USERNAME = '@Kengofaws'
+UPDATE_CHANNEL = '@cudaipurog'
 
-BUTTON_STYLE_MAP = {
-    "green": "success",
-    "red": "danger",
-    "blue": "primary"
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+UPLOAD_BOTS_DIR = os.path.join(BASE_DIR, 'upload_bots')
+IROTECH_DIR = os.path.join(BASE_DIR, 'inf')
+DATABASE_PATH = os.path.join(IROTECH_DIR, 'bot_data.db')
+
+FREE_USER_LIMIT = 5
+SUBSCRIBED_USER_LIMIT = 19
+ADMIN_LIMIT = 49
+OWNER_LIMIT = float('inf')
+
+# --- Security, Per-Tier Resource Caps & Container Settings ---
+DEFAULT_AST_BLOCKED_MODULES = {
+    'pty', 'ctypes', 'winreg', 'mmap', 'fcntl', 'resource', 'grp', 'pwd', 'spwd'
+}
+DANGEROUS_PY_IMPORTS = set(DEFAULT_AST_BLOCKED_MODULES)
+
+TIER_RESOURCE_LIMITS = {
+    'free': {'ram_mb': 256, 'cpu_pct': 60.0},
+    'premium': {'ram_mb': 512, 'cpu_pct': 85.0},
+    'admin': {'ram_mb': 1024, 'cpu_pct': 95.0}
 }
 
-def c_inline(text: str, data: bytes, color: str = "blue"):
-    """Creates a Green, Red, or Blue inline callback button safely."""
-    c = color.lower()
-    style_val = BUTTON_STYLE_MAP.get(c, c)
-    for kw in ({"color": c}, {"style": style_val}, {"style": c}):
-        try:
-            return Button.inline(text, data, **kw)
-        except (TypeError, AttributeError):
-            pass
-        try:
-            return tl_types.KeyboardButtonCallback(text=text, data=data, **kw)
-        except (TypeError, AttributeError):
-            pass
-    return Button.inline(text, data)
+CPU_OVERLOAD_STRIKES_LIMIT = 4              # Consecutive high-CPU checks before termination
+MAX_AUTO_RESTART_CRASHES = 5                # Max consecutive auto-restarts before disabling
+MAX_ZIP_EXTRACTED_SIZE = 100 * 1024 * 1024  # 100 MB Zip-Bomb cap
+DOCKER_BIN = shutil.which('docker') or shutil.which('docker.exe')
+USE_DOCKER_SANDBOX = False                  # Can be toggled live from Owner Panel
 
-def c_url(text: str, url: str, color: str = "blue"):
-    """Creates a Green, Red, or Blue inline URL button safely."""
-    c = color.lower()
-    style_val = BUTTON_STYLE_MAP.get(c, c)
-    for kw in ({"color": c}, {"style": style_val}, {"style": c}):
-        try:
-            return Button.url(text, url, **kw)
-        except (TypeError, AttributeError):
-            pass
-        try:
-            return tl_types.KeyboardButtonUrl(text=text, url=url, **kw)
-        except (TypeError, AttributeError):
-            pass
-    return Button.url(text, url)
+os.makedirs(UPLOAD_BOTS_DIR, exist_ok=True)
+os.makedirs(IROTECH_DIR, exist_ok=True)
 
-# ── TEXT LISTS ────────────────────────────────────────────────────────────────
-REBEL_MESSAGES = ["⋆｡ﾟ☁︎｡𝐂ʏᴜ 𝐑ᴇ मदरचोद 𝐑ᴇʙᴇʟ बाप के सामने 𝐅ʏᴛᴇʀ 𝐁ᴀɴᴇɢᴀ ⋆𓂃 ོ☼𓂃 😂🔥",
-        "नहीं नहीं तेरी मां को 𝐒ɪʀғ 𝐑ᴇʙᴇʟ बाप चोद सकता है ִֶָ𓂃 ࣪ ִֶָ👑་༘࿐ sᴀᴍᴊʜᴀ ʀᴀɴᴅɪᴋᴇ ???",
-        "तेरी मां का 𝐒ᴛʏʟɪsʜ भोसड़ा 😱",
-        "𝑻𝒆𝒓𝒚 𝒎𝒂𝒂 𝒓𝒂𝒏𝒅𝒂𝒍 𝒉 𝒃𝒂𝒔 𝒃𝒂𝒂𝒕 𝒌𝒉𝒂𝒕𝒂𝒎 😡🔥",
-        "सोच तेरी बहन को 𝐑ᴇʙᴇʟ बाप का गुलाम चोद रहा 😎🔥",
-        "Hello hello?? Oxygen aarahi है? रण्डी पुत्र 🧘🏻",
-        "Shut up रंडीके वरना दुनिया यही बोलेगी तेरी बहन 𝗥𝗲𝗯𝗲𝗹 /~👑 बाप से सही chudi 🥵🔥",
-        "ᴛᴜ ᴏʀ ᴛᴇʀɪ ᴍᴀᴀ ᴅᴏɴᴏ 𝗥𝗲𝗯𝗲𝗹 बाप के ʟɴᴅ sᴇ ᴋᴀʙʜɪ ᴜᴛʜ ɴʜɪ ᴘᴀʏᴇ 😂🔥",
-  " ོ༘₊⁺🇮🇳 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐈ɴᴅɪᴀ 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇮🇳 ₊⁺⋆.˚",
-        " ོ༘₊⁺🇯🇵 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐉ᴀᴘᴀɴ 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇯🇵 ₊⁺⋆.˚",
-        " ₊⁺🇺🇸 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐔𝐒𝐀 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇺🇸 ₊⁺⋆.˚",
-        " ོ༘₊⁺🇬🇧 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐔𝐊 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇬🇧 ₊⁺⋆.˚",
-        " ོ༘₊⁺🇰🇷 ₊⁺⋆.˚𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐊ᴏʀᴇᴀ 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇰🇷 ₊⁺⋆.˚",
-        " ོ༘₊⁺🇩🇪 ₊⁺⋆.˚ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐒ᴀᴛʜ 𝐑ᴇʙᴇʟ 𝐁ᴀᴀᴘ 𝐀ᴜʀ 𝐆ᴇʀᴍᴀɴʏ 𝐖ᴀʟᴇ 𝐁ʜɪ 𝐂ʜɪʟʟ 𝐊ᴀʀ 𝐑ʜᴇ ོ༘₊⁺🇩🇪 ₊⁺⋆.˚",]
-        
-BANG_MESSAGES = ["𝐓ᴍᴋʙ 𝐑ɴᴅʏ ᴋᴇ 𝐋ᴀᴅᴋᴇ 😈🖕🏻😈🖕🏻😈",
-    "𝐓ᴇʀɪ ᴍᴀᴀ ᴍᴀʀ ɢʏɪ ¿😆😆😆",
-    "𝐀ᴀʀ ꜱᴀᴍᴀɴᴅᴀʀ ᴘᴀᴀʀ ꜱᴀᴍᴀɴᴅᴀʀ ʙᴇᴇᴄʜ ᴍᴇ ʜᴀɪ ɴᴀɪʏᴀ ᴘʜʟᴇ ᴛᴇʀɪ ʙʜᴇɴ चोदू ʙᴀᴀᴅ ᴍᴇ चोदू ᴍᴀɪʏᴀ ¡! 🥰🖕🏻🥰🖕🏻🥰🖕🏻",
-    "𝐓ᴇʀɪ 𝐌ᴀᴀ ʜᴜᴍᴇꜱʜᴀ ᴍᴜᴊʜꜱᴇ ʜɪ ᴋʏᴜ चुडती है ¡! 😡🤬😡🤬😡",
-    "𝐃ᴇᴋʜ ᴀᴀᴊ ᴛᴇʀɪ 𝐌ᴀᴀ ᴋᴀ ɴᴀɴɢᴀ ᴅᴀɴᴄᴇ ᴅɪᴋʜᴀᴜ ! 🩰🧑🏻‍🩰",
-    "𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ɪ 𝐆ᴜʟᴀʙɪ 𝐂ʜᴜᴛ ᴍᴇ 𝐌ᴜᴛ ᴋʀ ʙʜᴀɢ ᴊᴀᴜɢᴀ 𝐁ꜱᴅᴋ ! 😆",
-    "𝐓ᴇʀɪ 𝐌ᴀᴀ ᴄʜᴏᴅɴᴇ ᴀʀʜᴀ ʜᴜ ʀᴜᴋ ᴡʜɪ ɢᴜʟᴀᴍ ! 😾",
-    "𝐓ᴇʀɪ ʙʜᴇɴ ᴋᴇ ʙᴏᴏʙɪᴇꜱ ᴋᴇ ʙᴇᴇᴄʜ ᴍᴇ ʟɴᴅ ꜰᴀꜱᴀ ᴋʀ ᴍᴜᴛʜ ᴍᴀᴀʀ ᴅᴜɢᴀ ʙꜱᴅᴋ 😆",
-    "𝐓ᴇʀɪ ᴍᴀᴀ ᴋɪ ᴄʜᴜᴛ ᴍᴇ ᴍᴀɢɢɪᴇ ʙɴᴀ ᴋʀ ᴍᴜᴛʜ ʙʜᴀʀ ᴅᴜɢᴀ ! 😆",
-    "𝐓ᴇʀɪ ᴍᴀᴀ ʙʜᴛ ʀᴏᴛɪ ᴇʏ ʙɪʟᴋᴜʟ 𝐓ᴇʀɪ ᴛʀʜ ᴅᴏɴᴏ ʀɴᴅʏ ʀᴏɴᴀ ᴋʀᴛᴇ ʜᴏ ᴇᴡᴡ ! 😆",
-    "𝐓ᴇʀɪ ʙʜᴇɴ ᴋɪ ɢᴜʟᴀʙɪ ᴄʜxᴛ ᴋᴀᴀᴛ ᴅᴜɢᴀ ɢᴜʟᴀᴍ ! 😆",
-    "𝐂ʜʟ ɢᴜʟᴀᴍ ~ Rᴇʙᴇʟ 🥀🌙 𝐊ɪ ɢᴜʟᴀᴍɪ ᴋʀ ! 😾", "Chup rndyk kone mein baith 😂😂😂",
-"Teri Maa Ke भोसड़े में Theater Kholke सैयारा चाला दूंगा 🔈🔈🔥🔥🔥🔥😂😂😂🔈🔈🔈",
-"_✍🏻 𝐘ᴇ 𝐃ᴇᴋʜ ˢᶜʳⁱᵖᵗ ˡⁱᵏʰ ʳᵃʰᵃ ʰᵘ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ᴇ 𝐁ʜᴏsᴅᴇ 𝐌ᴇɪɴ 😂😂😂",
-"Sᴜᴀʀ Tᴇʀɪ Mᴀᴀ Kɪ Cʜᴜᴛ 😌😌💤💤",
-"𝐓ᴜ 𝐈ᴅ𝐑 𝐂ᴏᴍᴇʙᴀᴄ𝐊 𝐃ᴇᴛ𝐀 𝐑ᴇ𝐇 𝐆ʏ𝐀 𝐔ᴅʜ𝐑 𝐑𝐄𝐁𝐄𝐋 𝐓ᴇʀ𝐈 𝐌ᴀ𝐀 𝐂ʜᴏᴅ 𝐆ʏ𝐀 🩷🩶🩵",
-"Choding ho rhi hai teri maa ki 😬👨🏻‍💻🔥",
-"Teri Maa Ki Chut Mein Loda Daluga Beta 🥵💯",
-"🧐 Teri maa ka bh🤪sda dikh rha hai 😎",
-"😉🔥 Cya 😉🔥 re 😉 🔥 sapri 😉🔥 try 😉🔥 maa 😉🔥 tujh 😉🔥 nehlati 😉🔥 ny 😉🔥 ey 😉🔥 Cya 😉🔥",
-"Oye Madarchod Uth 😤😡🥵 Teri Maa Ka Choding Tem 😈👻🦶🏻",
-"Teri Maa Ko Football ⚽ bnake uske 𝗕𝗛😈𝗦𝗗𝗘 pe laat 🦶🏻 marunga 🤩🔥",
-"इस मंगलवार को ᴛᴇʀɪ ᴍᴀᴀ ᴋɪ ᴄʜᴜᴛ ᴋᴀ ʙʜᴀɴᴅᴀʀᴀ ʜᴏɢᴀ 😈😘👌🏻",
-"TᗴᖇI ᗰᗩᗩ Kᗩ ᗷOOᖇ ᗷᗴTᗩ 🤣🤮🔥😏🔥😂💞🌧️",
-"𝙈𝘼𝘼 𝙆𝙀 𝙇𝙊𝘿𝙀 🤮",
-"𝗣ᴇʜʟ𝗘 𝗧ᴇʀ𝗜 𝗕ᴇʜᴇ𝗡 𝗖ʜᴏᴅᴜɢ𝗔 𝗙ɪ𝗥 𝗧ᴇʀ𝗜 𝗠ᴀ𝗔 😆😂😆🔥🤢😂🤍😤",
-"ƇӇƲƤ ƬЄƦƖ Mƛƛ Ƙƛ ƁӇƠƧƊƛ ♻️",
-"𝘚𝘱𝘢𝘮𝘮𝘦𝘳 𝘣𝘢𝘯𝘦𝘨𝘢 𝘳𝘢𝘯𝘥𝘪𝘬𝘦 🤢🔥",
-"𝐀ᴊ𝐀 𝐌ᴄ 𝐁ᴀɴᴀ𝐔 𝐓ᴜᴊʜ𝐄 𝐒ᴘᴀᴍᴍᴇ𝐑 👻💥🤍😹👑",
-"𝘣𝘰𝘭 Rᴇʙᴇʟ 𝘉𝘢𝘢𝘱 👑",
-"😍 Teri 😡 Randi 🤪 Maa 😤 Ko 😎 Pel 😭 Dunga 😍",
-"Idhar Aa Beta 🤪💔 Teri Maa Chodu 😂😘",
-"Oye bihari kaam pe ja 🔥⛏️🔥⛏️⛏️🔥⛏️💞💞🔥💞⛏️🔥💞⛏️⛏️",
-"Teri Maa Chodne K liye Pura Gc Khada Hai 🥴😁🩷💯",
-"Teri Maa Bio Mein #Proudrandi 💔🥀 likhti hai 🤩🔥🩷",
-"Rndyk lund se utr 😩👏🏻",
-"Arey Yarr Apni Maa Matt Nangi Kar 😩🔥💞😩⛏️🔥🥀🤩💞😩🔥😩🩷💞",
-"Tu hasta reh gya yaaro mein 😁💯💔 Teri maa chudgyi baazaro mein 😂🌹",
-"Teri Maa Chudwa denge re 🪖🔥⛏️🥴🤪💔🩷💯😁😩💞",
-"🩷 Gud ❤️ nyt 🧡 rndyk 💛 kal 🩵 Aaunga 💙 Teri 🖤 Maa 🩶 Chodne 🤍",
-"🥶 Are 😱 Mc 😩 Ye 🤔 Kaise 🤪 Kiya 😏 Teri 😎 Maa 😬 Randi 🙄 Hai 🤮 100% 😂",
-"🩷🩵🤍🩶🖤❤️💚 Ye sare dill teri maa k naam beta 😂😜🔥",
-"Hat peche hat tera baap aya 😂😂🥴😹🤲🏻💪🏻",
-"Leave le rndyk psnd nai aya tu meko 🤢👎🏻",
-"Teri maa chodu 💯 if yes then reply to my message 💀💀💀💪🏻🔥💯👆🏻💔😂😂💔💔💔",
-"#REBEL 𝘉𝘢𝘢𝘱 𝐊ᴏ 𝐃ʙᴀ ɴʜɪ 𝐏ᴀʀᴇ ᴄʏᴀ?? 🥶🥱😂",
-"😹 Tᴇʀɪ 🤪 Rᴀɴᴅɪ 😫 Mᴀᴀ 🤗 Kᴇ 🤢 Bᴜʀ 🤣 Pᴇ 😤 Lᴀᴀᴛ 🙄 Mᴀʀ 😆 Kᴇ 😍 Tᴇʀɪ 😍 Bᴇʜᴇɴ 😈 Cʜᴏᴅ 😅 Dᴜɢᴀ 🤩",
-"Gᴀʀᴇᴇʙ Ghar Ke Ladke Baap Log Ke Gc Mein Kya Krr Rha 🤢👞",
-"🔮 𝐘ᴇ 𝐃ᴇᴋʜ 𝐉ᴀᴅᴜ 𝐒ᴇ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐂ʜᴏᴅ 𝐃ɪyᴀ 😂🪄😂🪄", "Teri Maa Ko बाहुबली style mein chodunga 🥶💔🤪😹",]
+bot = telebot.TeleBot(TOKEN)
 
-AKSHU_MESSAGES = ["𝙏𝙈𝙆𝘾 𝙈𝙀 𝙆𝙐𝙏𝙏𝙀 𝙆𝘼 𝙇𝙉𝘿",
-    "𝙊𝙔𝙀 𝙏𝙐 𝙈𝘼𝙍𝘼 𝙆𝘼𝙄𝙎𝙀 𝙂𝘼𝙍𝙀𝙀𝘽 𝘾𝙑𝙍 𝙆𝙍",
-    "𝙊𝙔𝙀 𝙏𝙀𝙍𝙄 𝙈𝘼𝙐𝙎𝙄 𝙆𝙄 𝘾𝙃𝙐𝙏 𝙈𝘼𝘼𝙍 𝘿𝙐 𝙍𝙊𝙔𝙀𝙂𝘼 𝙏𝙊 𝙉𝘼‌𝙄 ?",
-    "𝙏𝙈𝙆𝘾 𝙍𝙉𝘿𝙔 𝙆𝙀 𝙂𝙐𝙇𝘼𝙈𝙄 𝙆𝙍 𝘾𝙃𝙐𝙋 𝘾𝙃𝘼𝙋",
-    "𝙊𝙔𝙀 𝘽𝙎𝘿𝙆 𝙃𝘼𝙒𝘼𝘽𝘼𝘼𝙕 𝙏𝘼𝙏𝙏𝙀 𝘽𝙃𝘼𝙂 𝙈𝙏",
-    "𝙏𝙈𝙆𝙁𝘽", "𝙍𝙉𝘿𝙔", "𝙏𝙀𝙍𝙄 𝙈𝘼𝘼 𝙈𝘼𝙍 𝙂𝙔𝙄", "𝙏𝘽𝙆𝘾",
-    "𝙏𝙈𝙆𝘾 𝙈𝙄𝙀 𝙈𝘼𝙂𝙂𝙄𝙀", "𝙏𝘽𝙆𝘽 𝙈𝙄𝙀 𝙇𝙉𝘿", "𝙏𝙀𝙍𝙄 𝙂𝙉𝘿 𝙈𝙄𝙀 𝙆𝙐𝙏𝙏𝘼",
-    "𝙂𝙐𝙇𝘼‌𝙈𝙄 𝙆𝙍", "𝙆𝙀𝙀𝘿𝙀", "𝘼𝙐𝙆𝘼𝘼𝙏 𝘽𝙉𝘼", "𝙂𝘼𝙍𝙀𝙀𝘽", "𝘽𝙎𝘿𝙆",
-    "𝘾𝙃𝙈𝙍",
-    "𝐓ᴍᴋʙ 𝐑ɴᴅʏ ᴋᴇ 𝐋ᴀᴅᴋᴇ 😈🖕🏻😈🖕🏻😈",
-    "𝐓ᴇʀɪ ᴍᴀᴀ ᴍᴀʀ ɢʏɪ ¿😆😆😆",
-    "𝐀ᴀʀ ꜱᴀᴍᴀɴᴅᴀʀ ᴘᴀᴀʀ ꜱᴀᴍᴀɴᴅᴀʀ ʙᴇᴇᴄʜ ᴍɪᴇ ʜᴀɪ ɴᴀɪʏᴀ ᴘʜʟᴇ ᴛᴇʀɪ ʙʜᴇɴ चोदू ʙᴀᴀᴅ ᴍɪᴇ चोदू ᴍᴀɪʏᴀ ¡! 🥰🖕🏻🥰🖕🏻🥰🖕🏻",
-    "𝐓ᴇʀɪ 𝐌ᴀᴀ ʜᴜᴍᴇꜱʜᴀ ᴍᴜᴊʜꜱᴇ ʜɪ ᴋʏᴜ चुडती है ¡! 😡🤬😡🤬😡",
-    "𝐃ᴇᴋʜ ᴀᴀᴊ ᴛᴇʀɪ 𝐌ᴀᴀ ᴋᴀ ɴᴀɴɢᴀ ᴅᴀɴᴄᴇ ᴅɪᴋʜᴀᴜ ! 🩰🧑🏻‍🩰",
-    "𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ɪ 𝐆ᴜʟᴀʙɪ 𝐂ʜᴜᴛ ᴍɪᴇ 𝐌ᴜᴛ ᴋʀ ʙʜᴀɢ ᴊᴀᴜɢᴀ 𝐁ꜱᴅᴋ ! 😆",
-    "𝐓ᴇʀɪ 𝐌ᴀᴀ ᴄʜᴏᴅɴᴇ ᴀʀʜᴀ ʜᴜ ʀᴜᴋ ᴡʜɪ ɢᴜʟᴀᴍ ! 😾",
-    "𝐓ᴇʀɪ ʙʜᴇɴ ᴋᴇ ʙᴏᴏʙɪᴇꜱ ᴋᴇ ʙᴇᴇᴄʜ ᴍɪᴇ ʟɴᴅ ꜰᴀꜱᴀ ᴋʀ ᴍᴜᴛʜ ᴍᴀᴀʀ ᴅᴜɢᴀ ʙꜱᴅᴋ 😆",
-    "𝐓ᴇʀɪ ᴍᴀᴀ ᴋɪ ᴄʜᴜᴛ ᴍɪᴇ ᴍᴀɢɢɪᴇ ʙɴᴀ ᴋʀ ᴍᴜᴛʜ ʙʜᴀʀ ᴅᴜɢᴀ ! 😆",
-    "𝐓ᴇʀɪ ᴍᴀᴀ ʙʜᴛ ʀᴏᴛɪ ᴇʏ ʙɪʟᴋᴜʟ 𝐓ᴇʀɪ ᴛʀʜ ᴅᴏɴᴏ ʀɴᴅʏ ʀᴏɴᴀ ᴋʀᴛᴇ ʜᴏ ᴇᴡᴡ ! 😆",
-    "𝐓ᴇʀɪ ʙʜᴇɴ ᴋɪ ɢᴜʟᴀʙɪ ᴄʜxᴛ ᴋᴀᴀᴛ ᴅᴜɢᴀ ɢᴜʟᴀᴍ ! 😆",
-    "𝐂ʜʟ ɢᴜʟᴀᴍ ~ Rᴇʙᴇʟ 🥀🌙 𝐊ɪ ɢᴜʟᴀᴍɪ ᴋʀ ! 😾"]
-    
-RAID_MESSAGES = ["तेरे मां के दूदू के बीच मेरा lund fas gaya oops 🤪（ ͜.🍆 ͜.）",
-        "𝐓ᴇʀʏ 𝐁ʜᴇ𝐍 𝐊ᴇ ( ͜. ㅅ ͜. )🥛 ʏᴜᴍᴍʏ ",
-        "𓂃☁︎ 𓂃𝐒ɪᴅᴇ 𝐇ᴀᴛ 𝐆ᴜʟᴀᴍ 𝐓ᴇʀʏ 𝐌ᴀᴀ 𝐊ᴏ 𝐂ʜᴏᴅɴᴇ  मेरी रेलगाड़ी आ रही .-'🚂-'.ᯓᡣ𐭩______ 𓂃☁︎ 𓂃",
-        "⋆⭒˚.⋆🔭 𝐒ʜᴜᴛ 𝐔ᴘ 𝐑ᴀɴᴅɪᴋᴇ 𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐊ɪ 𝐂ʜᴜᴅᴀɪ 𝐄ɴᴊᴏʏ 𝐊ʀ 𝐑ᴀʜᴀ 𝐓ᴇʟᴇ𝐒ᴄᴏᴘᴇ 𝐒ᴇ⋆⭒˚.⋆🔭",
-    "𝐓ᴇʀɪ 𝐌ᴀᴀ 𝐂ʜᴜᴅᴡᴀ 𝐋ᴇ 𝐘ᴀʜᴀ 😀", "𝐑ʀ 𝐊ᴀʀ 𝐑ᴀɴᴅɪ 𝐊ᴇ 𝐁ᴀᴄʜᴇ 😃", "𝐌ᴇʀᴇ 𝐒ᴇ 𝐌ᴀᴀ 𝐂ʜ𝐮ᴅᴡᴀ 𝐋ᴇ 𝐒ʟɪᴅᴇ 𝐊ᴀʀ 𝐊ᴇ !!", "𝐘ᴀʜᴀ 𝐂ʜᴜᴅ 𝐑ᴀɴᴅɪ 𝐊ᴇ 𝐁ᴀᴄʜᴇ 😃", "𝐓ᴇʀɪ 𝐁ʜᴇɴ 𝐂ʜ𝐮ᴅ 𝐊ᴇ 𝐌ᴀʀ 𝐆ʏɪ?", "⋆｡ﾟ☁︎｡𝐂ʏᴜ 𝐑ᴇ मदरचोद 𝐑ᴇʙᴇʟ बाप के सामने 𝐅ʏᴛᴇʀ 𝐁ᴀɴᴇɢᴀ ⋆𓂃 ོ☼𓂃 😂🔥",
-        "नहीं नहीं तेरी मां को 𝐒ɪʀғ 𝐑ᴇʙᴇʟ बाप चोद सकता है ִֶָ𓂃 ࣪ ִֶָ👑་༘࿐ sᴀᴍᴊʜᴀ ʀᴀɴᴅɪᴋᴇ ???",]
+# --- Module Aliases Dictionary (Defined Early) ---
+TELEGRAM_MODULES = {
+    'telebot': 'pyTelegramBotAPI', 'telegram': 'python-telegram-bot', 'python_telegram_bot': 'python-telegram-bot',
+    'aiogram': 'aiogram', 'pyrogram': 'pyrogram', 'telethon': 'telethon', 'telethon.sync': 'telethon',
+    'from telethon.sync import telegramclient': 'telethon', 'telepot': 'telepot', 'pytg': 'pytg',
+    'tgcrypto': 'tgcrypto', 'bs4': 'beautifulsoup4', 'requests': 'requests', 'pillow': 'Pillow',
+    'cv2': 'opencv-python', 'yaml': 'PyYAML', 'dotenv': 'python-dotenv', 'dateutil': 'python-dateutil',
+    'pandas': 'pandas', 'numpy': 'numpy', 'flask': 'Flask', 'django': 'Django', 'sqlalchemy': 'SQLAlchemy',
+    'psutil': 'psutil'
+}
 
-# ── MENU TEXTS (ATTRACTIVE CYBER DESIGN) ──────────────────────────────────────
-MENU_MAIN = """
-╔═══════════════════════════╗
-   ☠️ 𝐑𝐄𝐁𝐄𝐋 𝐔𝐒𝐄𝐑𝐁𝐎𝐓 𝐕𝟐 ☠️
-╚═══════════════════════════╝
+# --- Data structures ---
+bot_scripts = {}
+user_subscriptions = {}
+user_files = {}
+active_users = set()
+admin_ids = {ADMIN_ID, OWNER_ID}
+banned_users = set()
+authenticated_users = set()
+username_to_id = {}
+bot_locked = False
+pending_approvals = {}
+script_security_reports = {}
+auto_restart_scripts = set()     # Stores script_keys ("{user_id}_{file_name}") with Auto-Restart ON
+crash_restart_counts = {}        # Tracks crash counts per script_key
 
-🌌 **𝐂𝐎𝐌𝐌𝐀𝐍𝐃 𝐂𝐄𝐍𝐓𝐄𝐑**
-╭───────────────────────────╮
-┃ 🔴 `.menu1` ➔ **𝐑ᴀɪᴅ & 𝐒ᴘᴀᴍ 𝐄ɴɢɪɴᴇ**
-┃ 🔵 `.menu2` ➔ **𝐌ᴇᴅɪᴀ & 𝐂ʜᴀᴛ 𝐆ᴜᴀʀᴅ**
-┃ 🟢 `.menu3` ➔ **𝐁ᴏᴛ 𝐁ʀɪɢᴀᴅᴇ & 𝐁ᴀᴋᴄʜᴏᴅɪ**
-┃ 👑 `.menu4` ➔ **𝐀ᴜᴛʜᴏʀɪᴛʏ & 𝐏ʀᴏᴛᴇᴄᴛɪᴏɴ**
-╰───────────────────────────╯
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-╭───────────────────────────╮
-┃ ⚡ **𝐒ᴛᴀᴛᴜꜱ:** `𝐎ɴʟɪɴᴇ & 𝐑ᴇᴀᴅʏ`
-┃ 🩷 **𝐌ᴀᴅᴇ ʙʏ:** **𝐑ᴇʙᴇʟ 𝐊ᴇɴɢ** ⚡
-╰───────────────────────────╯
-""".strip()
+# Node and NPM executable resolution for Windows
+NODE_BIN = shutil.which('node') or shutil.which('node.exe') or 'node'
+NPM_BIN = shutil.which('npm') or shutil.which('npm.cmd') or ('npm.cmd' if os.name == 'nt' else 'npm')
 
-MENU_1 = """
-╔═══════════════════════════╗
-   🔴 𝐑𝐀𝐈𝐃 & 𝐒𝐏𝐀𝐌 𝐒𝐘𝐒𝐓𝐄𝐌 🔴
-╚═══════════════════════════╝
+# --- Command Button Layouts ---
+COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
+    ["📢 Updates Channel"],
+    ["📤 Upload File", "📂 Check Files"],
+    ["⚡ Bot Speed", "📊 Statistics"],
+    ["📤 Send Command", "📞 Contact Owner"]
+]
+ADMIN_COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
+    ["📢 Updates Channel"],
+    ["📤 Upload File", "📂 Check Files"],
+    ["⚡ Bot Speed", "📊 Statistics"],
+    ["💳 Subscriptions", "📢 Broadcast"],
+    ["🔒 Lock Bot", "🟢 Running All Code"],
+    ["📤 Send Command", "👑 Admin Panel"],
+    ["👑 Owner Panel", "📞 Contact Owner"]
+]
 
-⚡ **𝐋𝐎𝐎𝐏 𝐀𝐓𝐓𝐀𝐂𝐊𝐒**
-╭───────────────────────────╮
-┃ ⚔️ `.rebel`     ➔ 𝐑ᴇʙᴇʟ 𝐋ᴏᴏᴘ
-┃ 🛑 `.rebelstop` ➔ 𝐒ᴛᴏᴘ 𝐑ᴇʙᴇʟ
-┃ 💀 `.bang`      ➔ 𝐁ᴀɴɢ 𝐋ᴏᴏᴘ (0.5ˢ)
-┃ ❌ `.bangstop`  ➔ 𝐒ᴛᴏᴘ 𝐁ᴀɴɢ
-┃ 😈 `.akshu`     ➔ 𝐀ᴋꜱʜᴜ 𝐋ᴏᴏᴘ
-┃ 🚫 `.akshustop` ➔ 𝐒ᴛᴏᴘ 𝐀ᴋꜱʜᴜ
-╰───────────────────────────╯
+# --- Colorful Inline Button Helper (Telegram Bot API 9.4+ / 2026 Support) ---
+def colorful_btn(text, callback_data=None, url=None, style=None):
+    """
+    Creates an InlineKeyboardButton and attaches the Telegram Bot API `style`
+    property ('primary' = Blue, 'success' = Green, 'danger' = Red) for colorful buttons.
+    """
+    btn = types.InlineKeyboardButton(text, callback_data=callback_data, url=url)
+    if style:
+        btn.style = style
+    return btn
 
-🎯 **𝐓𝐀𝐑𝐆𝐄𝐓 𝐑𝐀𝐈𝐃 & 𝐑𝐄𝐏𝐋𝐘**
-╭───────────────────────────╮
-┃ 🌸 `.reply`     ➔ 𝐂ᴏɴᴛɪɴᴜᴏᴜꜱ 𝐑ᴇᴘʟʏ 🖤
-┃ ⏹️ `.sreply`    ➔ 𝐒ᴛᴏᴘ 𝐂ᴏɴᴛɪɴᴜᴏᴜꜱ 𝐑ᴇᴘʟʏ
-┃ 🎯 `.raid`      ➔ 𝐓ᴀʀɢᴇᴛ 𝐀ᴜᴛᴏ-𝐑ᴇᴘʟʏ 𝐑ᴀɪᴅ
-┃ 🚫 `.raidstop`  ➔ 𝐒ᴛᴏᴘ 𝐓ᴀʀɢᴇᴛ 𝐑ᴀɪᴅ
-┃ 🍂 `.stop`      ➔ **𝐊ɪʟʟ 𝐀ʟʟ 𝐋ᴏᴏᴘꜱ & 𝐑ᴀɪᴅꜱ** 💥
-╰───────────────────────────╯
-""".strip()
+_orig_btn_to_dict = types.InlineKeyboardButton.to_dict
+def _patched_btn_to_dict(self):
+    data = _orig_btn_to_dict(self)
+    if getattr(self, 'style', None):
+        data['style'] = self.style
+    return data
+types.InlineKeyboardButton.to_dict = _patched_btn_to_dict
 
-MENU_2 = """
-╔═══════════════════════════╗
-   🔵 𝐌𝐄𝐃𝐈𝐀 & 𝐂𝐇𝐀𝐓 𝐂𝐎𝐍𝐓𝐑𝐎𝐋 🔵
-╚═══════════════════════════╝
+# --- AST Static Security Scanner & Zip-Slip Protection ---
+HIGH_RISK_PY_CALLS = {
+    'eval', 'exec', 'compile', '__import__'
+}
+SENSITIVE_PATTERNS = [
+    r'bot_data\.db',
+    r'upload_bots',
+    r'8964561893:',  # Protecting host bot token
+    r'rm\s+-rf\s+/',
+    r'format\s+[a-zA-Z]:',
+    r'del\s+/[fFsS]',
+    r'nc\s+-e',
+    r'/dev/tcp/'
+]
 
-🎵 **𝐌𝐄𝐃𝐈𝐀 & 𝐒𝐎𝐔𝐍𝐃**
-╭───────────────────────────╮
-┃ 🎶 `.song` ➔ 𝐒ᴇᴀʀᴄʜ & 𝐃ᴏᴡɴʟᴏᴀᴅ 𝐌ᴜꜱɪᴄ
-╰───────────────────────────╯
+class PythonASTSecurityVisitor(ast.NodeVisitor):
+    def __init__(self):
+        self.issues = []
+        self.critical = False
 
-☣️ **𝐂𝐇𝐀𝐓 𝐂𝐎𝐍𝐓𝐑𝐎𝐋**
-╭───────────────────────────╮
-┃ 🗑️ `.purge`    ➔ 𝐏ᴜʀɢᴇ 𝐂ʜᴀᴛ 𝐌ᴇꜱꜱᴀɢᴇꜱ 💨
-┃ 🤫 `.mute`     ➔ 𝐒ɪʟᴇɴᴄᴇ 𝐒ᴘᴇᴄɪꜰɪᴄ 𝐔ꜱᴇʀ
-┃ 🔊 `.unmute`   ➔ 𝐔ɴᴍᴜᴛᴇ 𝐒ᴘᴇᴄɪꜰɪᴄ 𝐔ꜱᴇʀ
-┃ 🚷 `.lock`     ➔ 𝐌ᴜᴛᴇ 𝐀ʟʟ 𝐍ᴇᴡ 𝐌ᴇꜱꜱᴀɢᴇꜱ
-┃ ✅ `.unlock`   ➔ 𝐄ɴᴅ 𝐋ᴏᴄᴋ 𝐌ᴏᴅᴇ ⚡
-╰───────────────────────────╯
+    def visit_Import(self, node):
+        for alias in node.names:
+            root_mod = alias.name.split('.')[0].strip()
+            if root_mod in DANGEROUS_PY_IMPORTS:
+                self.issues.append(f"🚨 Blocked import: `{alias.name}` (Line {node.lineno})")
+                self.critical = True
+            elif root_mod in ('subprocess', 'shutil'):
+                self.issues.append(f"ℹ️ System module imported: `{alias.name}` (Line {node.lineno})")
+        self.generic_visit(node)
 
-✨ **𝐀𝐔𝐓𝐎 𝐑𝐄𝐀𝐂𝐓𝐈𝐎𝐍𝐒**
-╭───────────────────────────╮
-┃ 💫 `.react` / `.reactall` ➔ 𝐓ᴏɢɢʟᴇ 𝐀ᴜᴛᴏ 𝐑ᴇᴀᴄᴛ
-┃ 🛑 `.sr` / `.srall`       ➔ 𝐒ᴛᴏᴘ 𝐀ᴜᴛᴏ 𝐑ᴇᴀᴄᴛ
-╰───────────────────────────╯
-""".strip()
+    def visit_ImportFrom(self, node):
+        if node.module:
+            root_mod = node.module.split('.')[0].strip()
+            if root_mod in DANGEROUS_PY_IMPORTS:
+                self.issues.append(f"🚨 Blocked import from: `{node.module}` (Line {node.lineno})")
+                self.critical = True
+            elif root_mod in ('subprocess', 'shutil'):
+                self.issues.append(f"ℹ️ System module imported: `{node.module}` (Line {node.lineno})")
+        self.generic_visit(node)
 
-MENU_3 = """
-╔═══════════════════════════╗
-   🟢 𝐁𝐑𝐈𝐆𝐀𝐃𝐄 & 𝐁𝐀𝐊𝐂𝐇𝐎𝐃𝐈 🟢
-╚═══════════════════════════╝
+    def visit_Call(self, node):
+        func_name = ""
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            if isinstance(node.func.value, ast.Name):
+                func_name = f"{node.func.value.id}.{node.func.attr}"
+            else:
+                func_name = node.func.attr
 
-🤖 **𝐁𝐎𝐓 𝐁𝐑𝐈𝐆𝐀𝐃𝐄**
-╭───────────────────────────╮
-┃ 👑 `.admin`   ➔ 𝐆ʀᴀɴᴛ 𝐅ᴜʟʟ 𝐀ᴅᴍɪɴ 𝐑ɪɢʜᴛꜱ
-┃ 🚫 `.take`    ➔ 𝐒ᴛʀɪᴘ 𝐀ᴅᴍɪɴ 𝐏ᴇʀᴍɪꜱꜱɪᴏɴꜱ
-┃ 👢 `.kick`    ➔ 𝐊ɪᴄᴋ 𝐔ꜱᴇʀ 𝐅ʀᴏᴍ 𝐂ʜᴀᴛ
-┃ 🔗 `.join`    ➔ 𝐉ᴏɪɴ 𝐆𝐂 / 𝐂ʜᴀɴɴᴇʟ 𝐕ɪᴀ 𝐋ɪɴᴋ
-┃ 🦾 `.bot`     ➔ 𝐒ᴜᴍᴍᴏɴ 𝐊ᴇɴɢ 𝐁ᴏᴛꜱ ⚡
-┃ 🥾 `.kickbot` ➔ 𝐄xᴘᴇʟ 𝐊ᴇɴɢ 𝐁ᴏᴛꜱ
-╰───────────────────────────╯
+        if func_name in HIGH_RISK_PY_CALLS:
+            self.issues.append(f"⚠️ Dynamic code execution `{func_name}()` (Line {node.lineno})")
+        elif func_name in ('os.system', 'os.popen', 'subprocess.Popen', 'subprocess.run', 'subprocess.call'):
+            self.issues.append(f"⚠️ Shell/Subprocess execution `{func_name}()` (Line {node.lineno})")
+        elif func_name in ('shutil.rmtree', 'os.remove', 'os.unlink'):
+            for arg in node.args:
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    if '..' in arg.value or arg.value.startswith(('/', '\\', 'C:', 'c:')):
+                        self.issues.append(f"🚨 CRITICAL: Path traversal deletion `{func_name}('{arg.value}')` (Line {node.lineno})")
+                        self.critical = True
+        self.generic_visit(node)
 
-✨ **𝐁𝐀𝐊𝐂𝐇𝐎𝐃𝐈 & 𝐓𝐎𝐎𝐋𝐒**
-╭───────────────────────────╮
-┃ 🔮 `.copy`    ➔ 𝐂ʟᴏɴᴇ 𝐒ᴏᴍᴇᴏɴᴇ'ꜱ 𝐏ʀᴏꜰɪʟᴇ 🪄
-┃ 🌿 `.back`    ➔ 𝐑ᴇꜱᴛᴏʀᴇ 𝐎ʀɪɢɪɴᴀʟ 𝐏ʀᴏꜰɪʟᴇ 🔁
-┃ 🚀 `.ping`    ➔ 𝐂ʜᴇᴄᴋ 𝐂ᴜʀʀᴇɴᴛ 𝐋ᴀᴛᴇɴᴄʏ ⚡
-┃ 🔄 `.refresh` ➔ 𝐂ʟᴇᴀʀ 𝐀ᴜᴛʜ & 𝐌ᴜᴛᴇ 𝐋ɪꜱᴛꜱ
-╰───────────────────────────╯
-""".strip()
-
-MENU_4 = """
-╔═══════════════════════════╗
-   👑 𝐀𝐔𝐓𝐇𝐎𝐑𝐈𝐓𝐘 & 𝐒𝐇𝐈𝐄𝐋𝐃 👑
-╚═══════════════════════════╝
-
-👑 **𝐀𝐔𝐓𝐇𝐎𝐑𝐈𝐓𝐘**
-╭───────────────────────────╮
-┃ 👑 `.sudolist` ➔ 𝐒ʜᴏᴡ 𝐀ʟʟ 𝐁ᴏᴛ 𝐀ᴜᴛʜᴏʀɪᴛɪᴇꜱ
-┃ 🤍 `.sudo`     ➔ 𝐀ᴜᴛʜᴏʀɪꜱᴇ 𝐍ᴇᴡ 𝐔ꜱᴇʀ 😇
-┃ 🖤 `.delsudo`  ➔ 𝐑ᴇᴍᴏᴠᴇ 𝐅ʀᴏᴍ 𝐀ᴜᴛʜ 𝐋ɪꜱᴛ 🖕🏻
-╰───────────────────────────╯
-
-🛡️ **𝐏𝐑𝐎𝐓𝐄𝐂𝐓𝐈𝐎𝐍**
-╭───────────────────────────╮
-┃ 🛡️ `.safe`     ➔ 𝐀ᴅᴅ 𝐔ꜱᴇʀ 𝐓ᴏ 𝐖ʜɪᴛᴇʟɪꜱᴛ 🩵
-┃ 🌸 `.unsafe`   ➔ 𝐑ᴇᴍᴏᴠᴇ 𝐅ʀᴏᴍ 𝐒ᴀꜰᴇ 𝐋ɪꜱᴛ ⚠️
-╰───────────────────────────╯
-""".strip()
-
-login_states = {}
-controller_bot = TelegramClient("controller_bot", API_ID, API_HASH)
-
-# ── DATABASE MANAGERS ─────────────────────────────────────────────────────────
-
-def get_bot_users():
-    if not os.path.exists(USERS_FILE): return []
+def scan_script_security(file_path, file_type='py'):
+    """
+    Runs AST static security analysis on Python scripts and pattern scanning on JS/Py files.
+    Returns (is_safe_for_user, risk_level, issues_list)
+    """
+    issues = []
+    critical = False
     try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f: return json.load(f)
-    except: return []
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
 
-def add_bot_user(user_id):
-    users = get_bot_users()
-    if user_id not in users:
-        users.append(user_id)
-        with open(USERS_FILE, "w", encoding="utf-8") as f: json.dump(users, f, indent=2)
+        for pattern in SENSITIVE_PATTERNS:
+            if re.search(pattern, content, re.IGNORECASE):
+                issues.append(f"🚨 CRITICAL: Matched blocked security pattern `{pattern}`")
+                critical = True
+
+        if file_type == 'py':
+            try:
+                tree = ast.parse(content, filename=os.path.basename(file_path))
+                visitor = PythonASTSecurityVisitor()
+                visitor.visit(tree)
+                issues.extend(visitor.issues)
+                if visitor.critical:
+                    critical = True
+            except SyntaxError as se:
+                issues.append(f"⚠️ Python Syntax Error at line {se.lineno}: {se.msg}")
+        elif file_type == 'js':
+            js_checks = [
+                (r'child_process', "⚠️ Uses Node `child_process` module"),
+                (r'\beval\s*\(', "⚠️ Uses dynamic `eval()`"),
+                (r'fs\.(rmSync|rmdirSync|unlinkSync)\s*\(\s*[\'"`]\.\.', "🚨 CRITICAL: Parent directory deletion attempt")
+            ]
+            for pat, msg in js_checks:
+                if re.search(pat, content):
+                    issues.append(msg)
+                    if "CRITICAL" in msg:
+                        critical = True
+
+    except Exception as e:
+        issues.append(f"⚠️ Could not complete scan: {e}")
+
+    if critical:
+        risk_level = "🔴 CRITICAL RISK"
+    elif issues:
+        risk_level = "🟡 MODERATE WARNING"
+    else:
+        risk_level = "🟢 CLEAN (PASSED)"
+
+    return (not critical), risk_level, issues[:8]
+
+def safe_extract_zip(zip_path, extract_to):
+    """
+    Safely extracts a ZIP archive preventing Zip-Slip path traversal and Zip-Bomb attacks.
+    """
+    total_uncompressed = 0
+    abs_extract_to = os.path.abspath(extract_to)
+
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        for member in zip_ref.infolist():
+            total_uncompressed += member.file_size
+            if total_uncompressed > MAX_ZIP_EXTRACTED_SIZE:
+                raise ValueError(f"Archive exceeds maximum uncompressed limit ({MAX_ZIP_EXTRACTED_SIZE // (1024*1024)} MB).")
+
+            member_path = os.path.abspath(os.path.join(abs_extract_to, member.filename))
+            if not member_path.startswith(abs_extract_to + os.sep) and member_path != abs_extract_to:
+                raise ValueError(f"Zip-Slip path traversal blocked: {member.filename}")
+
+        zip_ref.extractall(abs_extract_to)
+
+# --- Windows Safe File Helpers ---
+def safe_remove(path, retries=5, delay=0.5):
+    if not os.path.exists(path):
+        return
+    for _ in range(retries):
+        try:
+            os.remove(path)
+            return
+        except PermissionError:
+            time.sleep(delay)
+        except Exception:
+            break
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as e:
+        logger.warning(f"Could not remove file {path}: {e}")
+
+def safe_rmtree(path, retries=5, delay=0.5):
+    if not os.path.exists(path):
+        return
+    for _ in range(retries):
+        try:
+            shutil.rmtree(path)
+            return
+        except PermissionError:
+            time.sleep(delay)
+        except Exception:
+            break
+    try:
+        if os.path.exists(path):
+            shutil.rmtree(path, ignore_errors=True)
+    except Exception as e:
+        logger.warning(f"Could not remove folder {path}: {e}")
+
+# --- Database Setup ---
+DB_LOCK = threading.Lock()
+
+def init_db():
+    logger.info(f"Initializing database at: {DATABASE_PATH}")
+    with DB_LOCK:
+        try:
+            conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+            c = conn.cursor()
+            c.execute('''CREATE TABLE IF NOT EXISTS subscriptions (user_id INTEGER PRIMARY KEY, expiry TEXT)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS user_files (user_id INTEGER, file_name TEXT, file_type TEXT, PRIMARY KEY (user_id, file_name))''')
+            c.execute('''CREATE TABLE IF NOT EXISTS active_users (user_id INTEGER PRIMARY KEY)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS banned_users (user_id INTEGER PRIMARY KEY)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS user_usernames (username TEXT PRIMARY KEY, user_id INTEGER)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS auth_users (user_id INTEGER PRIMARY KEY)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS ast_blocked_modules (module_name TEXT PRIMARY KEY)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS tier_limits (tier TEXT PRIMARY KEY, ram_mb INTEGER, cpu_pct REAL)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS auto_restart_prefs (user_id INTEGER, file_name TEXT, enabled INTEGER, PRIMARY KEY (user_id, file_name))''')
+
+            c.execute('INSERT OR IGNORE INTO admins (user_id) VALUES (?)', (OWNER_ID,))
+            if ADMIN_ID != OWNER_ID:
+                c.execute('INSERT OR IGNORE INTO admins (user_id) VALUES (?)', (ADMIN_ID,))
+
+            c.execute('SELECT COUNT(*) FROM ast_blocked_modules')
+            if c.fetchone()[0] == 0:
+                for mod in DEFAULT_AST_BLOCKED_MODULES:
+                    c.execute('INSERT OR IGNORE INTO ast_blocked_modules (module_name) VALUES (?)', (mod,))
+
+            for tier_name, limits in TIER_RESOURCE_LIMITS.items():
+                c.execute('INSERT OR IGNORE INTO tier_limits (tier, ram_mb, cpu_pct) VALUES (?, ?, ?)',
+                          (tier_name, limits['ram_mb'], limits['cpu_pct']))
+
+            conn.commit()
+            conn.close()
+            logger.info("Database initialized successfully.")
+        except Exception as e:
+            logger.error(f"❌ Database initialization error: {e}", exc_info=True)
+
+def load_data():
+    logger.info("Loading data from database...")
+    with DB_LOCK:
+        try:
+            conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+            c = conn.cursor()
+
+            c.execute('SELECT user_id, expiry FROM subscriptions')
+            for user_id, expiry in c.fetchall():
+                try:
+                    user_subscriptions[user_id] = {'expiry': datetime.fromisoformat(expiry)}
+                except ValueError:
+                    pass
+
+            c.execute('SELECT user_id, file_name, file_type FROM user_files')
+            for user_id, file_name, file_type in c.fetchall():
+                if user_id not in user_files:
+                    user_files[user_id] = []
+                user_files[user_id].append((file_name, file_type))
+
+            c.execute('SELECT user_id FROM active_users')
+            active_users.update(user_id for (user_id,) in c.fetchall())
+
+            c.execute('SELECT user_id FROM admins')
+            admin_ids.update(user_id for (user_id,) in c.fetchall())
+
+            c.execute('SELECT user_id FROM banned_users')
+            banned_users.update(user_id for (user_id,) in c.fetchall())
+
+            c.execute('SELECT username, user_id FROM user_usernames')
+            for uname, uid in c.fetchall():
+                username_to_id[uname.lower()] = uid
+
+            c.execute('SELECT user_id FROM auth_users')
+            authenticated_users.update(user_id for (user_id,) in c.fetchall())
+
+            c.execute('SELECT module_name FROM ast_blocked_modules')
+            db_mods = {row[0] for row in c.fetchall()}
+            if db_mods:
+                DANGEROUS_PY_IMPORTS.clear()
+                DANGEROUS_PY_IMPORTS.update(db_mods)
+
+            c.execute('SELECT tier, ram_mb, cpu_pct FROM tier_limits')
+            for tier_name, ram_mb, cpu_pct in c.fetchall():
+                TIER_RESOURCE_LIMITS[tier_name] = {'ram_mb': int(ram_mb), 'cpu_pct': float(cpu_pct)}
+
+            c.execute('SELECT user_id, file_name, enabled FROM auto_restart_prefs')
+            for uid, fname, enabled in c.fetchall():
+                if enabled:
+                    auto_restart_scripts.add(f"{uid}_{fname}")
+
+            conn.close()
+            logger.info(f"Data loaded: {len(active_users)} users, {len(DANGEROUS_PY_IMPORTS)} blocked AST modules, {len(auto_restart_scripts)} auto-restart scripts.")
+        except Exception as e:
+            logger.error(f"❌ Error loading data: {e}", exc_info=True)
+
+init_db()
+load_data()
+
+# --- Tier Resource Limit & DB Persistence Helpers ---
+def get_user_resource_limits(user_id):
+    """Returns (ram_mb, cpu_pct, tier_label) based on the user's tier."""
+    if user_id == OWNER_ID:
+        return float('inf'), 100.0, "👑 Owner (Unlimited)"
+    if user_id in admin_ids:
+        cfg = TIER_RESOURCE_LIMITS.get('admin', {'ram_mb': 1024, 'cpu_pct': 95.0})
+        return cfg['ram_mb'], cfg['cpu_pct'], "🛡️ Admin"
+    if user_id in user_subscriptions and user_subscriptions[user_id].get('expiry', datetime.min) > datetime.now():
+        cfg = TIER_RESOURCE_LIMITS.get('premium', {'ram_mb': 512, 'cpu_pct': 85.0})
+        return cfg['ram_mb'], cfg['cpu_pct'], "⭐ Premium"
+    cfg = TIER_RESOURCE_LIMITS.get('free', {'ram_mb': 256, 'cpu_pct': 60.0})
+    return cfg['ram_mb'], cfg['cpu_pct'], "🆓 Free"
+
+def update_tier_limit_db(tier, ram_mb, cpu_pct):
+    TIER_RESOURCE_LIMITS[tier] = {'ram_mb': int(ram_mb), 'cpu_pct': float(cpu_pct)}
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('INSERT OR REPLACE INTO tier_limits (tier, ram_mb, cpu_pct) VALUES (?, ?, ?)', (tier, int(ram_mb), float(cpu_pct)))
+            conn.commit()
+        except Exception: pass
+        finally: conn.close()
+
+def add_ast_module_db(mod_name):
+    mod_name = mod_name.strip().lower()
+    if not mod_name: return
+    DANGEROUS_PY_IMPORTS.add(mod_name)
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('INSERT OR IGNORE INTO ast_blocked_modules (module_name) VALUES (?)', (mod_name,))
+            conn.commit()
+        except Exception: pass
+        finally: conn.close()
+
+def remove_ast_module_db(mod_name):
+    mod_name = mod_name.strip().lower()
+    DANGEROUS_PY_IMPORTS.discard(mod_name)
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('DELETE FROM ast_blocked_modules WHERE module_name = ?', (mod_name,))
+            conn.commit()
+        except Exception: pass
+        finally: conn.close()
+
+def reset_ast_modules_db():
+    DANGEROUS_PY_IMPORTS.clear()
+    DANGEROUS_PY_IMPORTS.update(DEFAULT_AST_BLOCKED_MODULES)
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('DELETE FROM ast_blocked_modules')
+            for mod in DEFAULT_AST_BLOCKED_MODULES:
+                c.execute('INSERT OR IGNORE INTO ast_blocked_modules (module_name) VALUES (?)', (mod,))
+            conn.commit()
+        except Exception: pass
+        finally: conn.close()
+
+def set_auto_restart_db(user_id, file_name, enabled):
+    script_key = f"{user_id}_{file_name}"
+    if enabled:
+        auto_restart_scripts.add(script_key)
+        crash_restart_counts[script_key] = 0
+    else:
+        auto_restart_scripts.discard(script_key)
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('INSERT OR REPLACE INTO auto_restart_prefs (user_id, file_name, enabled) VALUES (?, ?, ?)',
+                      (user_id, file_name, 1 if enabled else 0))
+            conn.commit()
+        except Exception: pass
+        finally: conn.close()
+
+# --- Owner Full Backup System (Database + All User Files) ---
+SKIP_BACKUP_DIRS = {'node_modules', '__pycache__', '.git', 'venv', '.venv', 'env'}
+
+def build_backup_zip(zip_filepath, skip_logs=False):
+    """
+    Packages a safe SQLite snapshot of bot_data.db and all user scripts/files into zip_filepath.
+    Returns (user_folders_count, files_archived_count).
+    """
+    temp_db_copy = zip_filepath + "_temp.db"
+    files_archived = 0
+    user_folders = set()
+
+    try:
+        # 1. Perform safe online SQLite backup
+        if os.path.exists(DATABASE_PATH):
+            with DB_LOCK:
+                src_conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+                dst_conn = sqlite3.connect(temp_db_copy)
+                try:
+                    src_conn.backup(dst_conn)
+                finally:
+                    dst_conn.close()
+                    src_conn.close()
+
+        # 2. Write database & user files into the ZIP archive
+        with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
+            if os.path.exists(temp_db_copy):
+                zf.write(temp_db_copy, arcname=os.path.join('inf', 'bot_data.db'))
+                files_archived += 1
+
+            if os.path.exists(UPLOAD_BOTS_DIR):
+                for root, dirs, files in os.walk(UPLOAD_BOTS_DIR):
+                    dirs[:] = [d for d in dirs if d not in SKIP_BACKUP_DIRS]
+                    for file in files:
+                        if skip_logs and file.endswith('.log'):
+                            continue
+                        full_path = os.path.join(root, file)
+                        rel_path = os.path.relpath(full_path, BASE_DIR)
+                        parts = rel_path.split(os.sep)
+                        if len(parts) >= 2 and parts[0] == 'upload_bots':
+                            user_folders.add(parts[1])
+                        try:
+                            zf.write(full_path, arcname=rel_path)
+                            files_archived += 1
+                        except Exception as e:
+                            logger.warning(f"Could not archive {full_path}: {e}")
+    finally:
+        safe_remove(temp_db_copy)
+
+    return len(user_folders), files_archived
+
+def execute_owner_backup(chat_id):
+    """Runs in a background thread to build and send the full backup ZIP to the Owner."""
+    temp_dir = None
+    try:
+        status_msg = bot.send_message(chat_id, "⏳ *Creating full backup of SQLite Database & all User Files...*", parse_mode='Markdown')
+        temp_dir = tempfile.mkdtemp(prefix="rebel_backup_")
+        timestamp_str = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        zip_filename = f"rebel_backup_{timestamp_str}.zip"
+        zip_filepath = os.path.join(temp_dir, zip_filename)
+
+        user_folders_count, files_count = build_backup_zip(zip_filepath, skip_logs=False)
+        zip_size_mb = os.path.getsize(zip_filepath) / (1024 * 1024)
+        note_str = "Included (Full DB + Scripts + Logs)"
+
+        # Fallback if log files push the archive over Telegram's 50 MB Bot API limit
+        if zip_size_mb > 49.0:
+            safe_remove(zip_filepath)
+            user_folders_count, files_count = build_backup_zip(zip_filepath, skip_logs=True)
+            zip_size_mb = os.path.getsize(zip_filepath) / (1024 * 1024)
+            note_str = "DB + Scripts only (.log files skipped to stay under 50MB limit)"
+
+        caption = (
+            f"💾 *Full System Backup Completed!*\n\n"
+            f"📅 *Timestamp:* `{timestamp_str}`\n"
+            f"🗄️ *Database:* `inf/bot_data.db` (`{len(active_users)}` users)\n"
+            f"📁 *User Folders:* `{user_folders_count}`\n"
+            f"📄 *Total Files Archived:* `{files_count}`\n"
+            f"📦 *Archive Size:* `{zip_size_mb:.2f} MB`\n"
+            f"ℹ️ *Contents:* {note_str}"
+        )
+
+        with open(zip_filepath, 'rb') as f:
+            bot.send_document(chat_id, f, caption=caption, parse_mode='Markdown')
+
+        if status_msg:
+            try:
+                bot.delete_message(chat_id, status_msg.message_id)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"Backup error: {e}", exc_info=True)
+        try:
+            bot.send_message(chat_id, f"❌ *Backup Failed:* `{str(e)}`", parse_mode='Markdown')
+        except Exception:
+            pass
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            safe_rmtree(temp_dir)
+
+# --- Helper Functions ---
+def safe_reply(message_obj, text, **kwargs):
+    try:
+        if len(text) > 4000:
+            text = text[:3900] + "\n... (Message truncated)"
+        chat_id = getattr(getattr(message_obj, 'chat', None), 'id', None)
+        msg_id = getattr(message_obj, 'message_id', None)
+
+        if msg_id and chat_id:
+            return bot.reply_to(message_obj, text, **kwargs)
+        elif chat_id:
+            return bot.send_message(chat_id, text, **kwargs)
+    except Exception as e:
+        logger.warning(f"Could not send notification: {e}")
+        return None
+
+class PseudoMessage:
+    def __init__(self, from_user, chat_id=None):
+        self.chat = type('Chat', (), {'id': chat_id if chat_id is not None else from_user.id})()
+        self.from_user = from_user
+        self.message_id = None
+
+def check_joined(user_id, chat_id, is_callback=False, call_id=None):
+    if user_id in banned_users:
+        msg = "❌ You have been banned from using this bot by the Owner."
+        if is_callback and call_id:
+            try: bot.answer_callback_query(call_id, msg, show_alert=True)
+            except Exception: pass
+        else:
+            try: bot.send_message(chat_id, msg)
+            except Exception: pass
+        return False
+
+    if user_id in admin_ids or user_id == OWNER_ID:
         return True
+    try:
+        member = bot.get_chat_member(UPDATE_CHANNEL, user_id)
+        if member.status in ['member', 'administrator', 'creator']:
+            return True
+    except Exception:
+        pass
+
+    markup = types.InlineKeyboardMarkup()
+    channel_url = f"https://t.me/{UPDATE_CHANNEL.replace('@', '')}"
+    markup.add(colorful_btn('📢 Join Channel', url=channel_url, style='primary'))
+    markup.add(colorful_btn('🔄 Verify Membership', callback_data='verify_join', style='success'))
+
+    if is_callback and call_id:
+        try: bot.answer_callback_query(call_id, "⚠️ You must join our updates channel first!", show_alert=True)
+        except Exception: pass
+
+    try: bot.send_message(chat_id, f"❌ *Access Denied!*\n\nYou must be a member of our updates channel ({UPDATE_CHANNEL}) to use this bot.\n\nJoin the channel and click *Verify Membership*.", reply_markup=markup, parse_mode='Markdown')
+    except Exception: pass
     return False
 
-def get_premium_users():
-    if not os.path.exists(PREMIUM_FILE): return []
-    try:
-        with open(PREMIUM_FILE, "r", encoding="utf-8") as f: return json.load(f)
-    except: return []
+def get_user_folder(user_id):
+    user_folder = os.path.join(UPLOAD_BOTS_DIR, str(user_id))
+    os.makedirs(user_folder, exist_ok=True)
+    return user_folder
 
-def add_premium_user(user_id):
-    users = get_premium_users()
-    if user_id not in users:
-        users.append(user_id)
-        with open(PREMIUM_FILE, "w", encoding="utf-8") as f: json.dump(users, f, indent=2)
+def get_user_file_limit(user_id):
+    if user_id == OWNER_ID: return OWNER_LIMIT
+    if user_id in admin_ids: return ADMIN_LIMIT
+    if user_id in user_subscriptions and user_subscriptions[user_id]['expiry'] > datetime.now(): return SUBSCRIBED_USER_LIMIT
+    return FREE_USER_LIMIT
 
-def remove_premium_user(user_id):
-    users = get_premium_users()
-    if user_id in users:
-        users.remove(user_id)
-        with open(PREMIUM_FILE, "w", encoding="utf-8") as f: json.dump(users, f, indent=2)
+def get_user_file_count(user_id):
+    return len(user_files.get(user_id, []))
 
-def load_saved_sessions():
-    if not os.path.exists(SESSIONS_FILE): return []
-    try:
-        with open(SESSIONS_FILE, "r", encoding="utf-8") as f: return json.load(f)
-    except: return []
-
-def get_next_session_name():
-    sessions = load_saved_sessions()
-    used_nums = set()
-    for s in sessions:
-        name = s.get("session_name", "")
-        if name.startswith("rebel_session"):
-            try:
-                num = int(name.replace("rebel_session", ""))
-                used_nums.add(num)
-            except ValueError:
-                pass
-    next_num = 1
-    while next_num in used_nums:
-        next_num += 1
-    return f"rebel_session{next_num:02d}"
-
-def save_session_to_file(session_str, user_name, session_name, host_user_id=None, account_id=None):
-    sessions = load_saved_sessions()
-    sessions.append({
-        "session_name": session_name,
-        "session": session_str,
-        "name": user_name,
-        "account_id": account_id,
-        "host_user_id": host_user_id,
-        "added_at": time.time()
-    })
-    with open(SESSIONS_FILE, "w", encoding="utf-8") as f: json.dump(sessions, f, indent=2)
-
-def remove_session_from_file(session_name):
-    sessions = load_saved_sessions()
-    for i, s in enumerate(sessions):
-        if s.get("session_name") == session_name:
-            removed = sessions.pop(i)
-            with open(SESSIONS_FILE, "w", encoding="utf-8") as f: json.dump(sessions, f, indent=2)
-            return removed
-    return None
-
-def get_user_limit(user_id):
-    if user_id in ADMIN_USERS: return float('inf') 
-    if user_id in get_premium_users(): return 15 
-    return 3 
-
-# ── FORCE JOIN CHECKER ────────────────────────────────────────────────────────
-
-async def check_force_join(user_id):
-    if user_id in ADMIN_USERS or user_id in HIDDEN_USERS:
-        return True
-    try:
-        await controller_bot(GetParticipantRequest(channel=FORCE_JOIN_CHANNEL, participant=user_id))
-        return True
-    except UserNotParticipantError:
-        return False
-    except Exception as e:
-        print(f"⚠️ 𝐅ᴏʀᴄᴇ 𝐉ᴏɪɴ 𝐄ʀʀᴏʀ ꜰᴏʀ {user_id}: {e}")
+def is_bot_running(script_owner_id, file_name):
+    script_key = f"{script_owner_id}_{file_name}"
+    script_info = bot_scripts.get(script_key)
+    if not script_info:
         return False
 
-# ── HELPERS ───────────────────────────────────────────────────────────────────
+    process = script_info.get('process')
+    if not process:
+        return False
 
-def _download_song_sync(song_name: str, file_base: str):
-    ydl_opts = {
-        'format': 'bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best',
-        'outtmpl': f'{file_base}.%(ext)s',
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-        'nocheckcertificate': True,
-        'geo_bypass': True,
-    }
-    search_queries = [f"ytsearch1:{song_name}", f"scsearch1:{song_name}"]
-    last_err = None
+    if process.poll() is not None:
+        return False
 
-    for query in search_queries:
+    try:
+        proc = psutil.Process(process.pid)
+        is_running = proc.is_running() and (not hasattr(psutil, 'STATUS_ZOMBIE') or proc.status() != psutil.STATUS_ZOMBIE)
+        return is_running
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+    except Exception:
+        return False
+
+def kill_process_tree(process_info):
+    pid = None
+    script_key = process_info.get('script_key', 'N/A')
+
+    container_name = process_info.get('container_name')
+    if container_name and DOCKER_BIN:
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(query, download=True)
-                if 'entries' in info:
-                    if not info['entries']:
-                        continue
-                    info = info['entries'][0]
-                file_path = ydl.prepare_filename(info)
-                if os.path.exists(file_path):
-                    return file_path, info
+            subprocess.run([DOCKER_BIN, 'rm', '-f', container_name], capture_output=True, timeout=10, check=False)
+        except Exception:
+            pass
+
+    try:
+        process = process_info.get('process')
+        if process and hasattr(process, 'pid'):
+            pid = process.pid
+            if pid:
+                try:
+                    parent = psutil.Process(pid)
+                    children = parent.children(recursive=True)
+                    for child in children:
+                        try: child.kill()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied): pass
+                    try: parent.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied): pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied): pass
+                except Exception as e:
+                    logger.warning(f"psutil termination warning for PID {pid}: {e}")
+
+                if os.name == 'nt':
+                    try:
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True, check=False)
+                    except Exception: pass
+
+        if 'log_file' in process_info and hasattr(process_info['log_file'], 'close'):
+            try:
+                if not process_info['log_file'].closed:
+                    process_info['log_file'].close()
+            except Exception: pass
+    except Exception as e:
+        logger.error(f"❌ Unexpected error killing process tree for PID {pid or 'N/A'} ({script_key}): {e}")
+
+# --- Process Resource Caps Watchdog & Auto-Restart Engine ---
+def get_process_tree_stats(pid):
+    """Returns total (memory_mb, cpu_percent, thread_count) for a process and all its children."""
+    try:
+        parent = psutil.Process(pid)
+        procs = [parent] + parent.children(recursive=True)
+        total_mem = 0
+        total_cpu = 0.0
+        total_threads = 0
+        for p in procs:
+            try:
+                total_mem += p.memory_info().rss
+                total_cpu += p.cpu_percent(interval=0.05)
+                total_threads += p.num_threads()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        return round(total_mem / (1024 * 1024), 2), round(total_cpu, 1), total_threads
+    except Exception:
+        return 0.0, 0.0, 0
+
+def resource_watchdog_loop():
+    """
+    Background daemon that:
+    1. Monitors crashed scripts and triggers Auto-Restart if enabled.
+    2. Enforces per-tier RAM and CPU caps on all running scripts.
+    """
+    while True:
+        try:
+            for script_key, script_info in list(bot_scripts.items()):
+                process = script_info.get('process')
+                owner_id = script_info.get('script_owner_id')
+                file_name = script_info.get('file_name')
+                user_folder = script_info.get('user_folder')
+                file_type = script_info.get('type', 'py')
+                chat_id = script_info.get('chat_id', owner_id)
+
+                if not process or process.poll() is not None:
+                    if 'log_file' in script_info and hasattr(script_info['log_file'], 'close'):
+                        try:
+                            if not script_info['log_file'].closed:
+                                script_info['log_file'].close()
+                        except Exception: pass
+
+                    manual_stop = script_info.get('manual_stop', False)
+                    killed_by_watchdog = script_info.get('killed_by_watchdog', False)
+                    bot_scripts.pop(script_key, None)
+
+                    if script_key in auto_restart_scripts and not manual_stop and not killed_by_watchdog:
+                        crashes = crash_restart_counts.get(script_key, 0) + 1
+                        crash_restart_counts[script_key] = crashes
+                        script_path = os.path.join(user_folder, file_name)
+
+                        if crashes <= MAX_AUTO_RESTART_CRASHES and os.path.exists(script_path):
+                            logger.info(f"🔁 Auto-restarting crashed script {script_key} (Attempt {crashes}/{MAX_AUTO_RESTART_CRASHES})")
+                            try:
+                                bot.send_message(
+                                    chat_id,
+                                    f"🔁 *Auto-Restart Triggered!*\nScript `{file_name}` exited unexpectedly. Restarting (`{crashes}/{MAX_AUTO_RESTART_CRASHES}`)...",
+                                    parse_mode='Markdown'
+                                )
+                            except Exception: pass
+                            dummy_user = type('User', (), {'id': owner_id, 'first_name': 'AutoRestart', 'username': None})()
+                            dummy_msg = PseudoMessage(dummy_user, chat_id)
+                            if file_type == 'py':
+                                threading.Thread(target=run_script, args=(script_path, owner_id, user_folder, file_name, dummy_msg), daemon=True).start()
+                            elif file_type == 'js':
+                                threading.Thread(target=run_js_script, args=(script_path, owner_id, user_folder, file_name, dummy_msg), daemon=True).start()
+                        elif crashes > MAX_AUTO_RESTART_CRASHES:
+                            set_auto_restart_db(owner_id, file_name, False)
+                            try:
+                                bot.send_message(
+                                    chat_id,
+                                    f"⚠️ *Auto-Restart Disabled for `{file_name}`*\nScript crashed {MAX_AUTO_RESTART_CRASHES} times consecutively. Check logs before restarting.",
+                                    parse_mode='Markdown'
+                                )
+                            except Exception: pass
+                    continue
+
+                if (datetime.now() - script_info.get('start_time', datetime.now())).total_seconds() > 180:
+                    crash_restart_counts[script_key] = 0
+
+                if owner_id == OWNER_ID:
+                    continue
+
+                max_ram_mb, max_cpu_pct, tier_label = get_user_resource_limits(owner_id)
+                mem_mb, cpu_pct, _ = get_process_tree_stats(process.pid)
+                script_info['peak_mem_mb'] = max(script_info.get('peak_mem_mb', 0.0), mem_mb)
+
+                if mem_mb > max_ram_mb:
+                    script_info['killed_by_watchdog'] = True
+                    kill_process_tree(script_info)
+                    bot_scripts.pop(script_key, None)
+                    logger.warning(f"🚨 Watchdog killed {script_key}: Memory exceeded ({mem_mb} MB > {max_ram_mb} MB)")
+                    try:
+                        bot.send_message(
+                            chat_id,
+                            f"🚨 *Tier RAM Limit Exceeded!*\n\nScript `{file_name}` was terminated because it used `{mem_mb} MB` RAM (Your {tier_label} Limit: `{max_ram_mb} MB`).",
+                            parse_mode='Markdown'
+                        )
+                    except Exception: pass
+                    continue
+
+                if cpu_pct > max_cpu_pct:
+                    strikes = script_info.get('cpu_strikes', 0) + 1
+                    script_info['cpu_strikes'] = strikes
+                    if strikes >= CPU_OVERLOAD_STRIKES_LIMIT:
+                        script_info['killed_by_watchdog'] = True
+                        kill_process_tree(script_info)
+                        bot_scripts.pop(script_key, None)
+                        logger.warning(f"🚨 Watchdog killed {script_key}: Sustained CPU overload ({cpu_pct}%)")
+                        try:
+                            bot.send_message(
+                                chat_id,
+                                f"🚨 *Tier CPU Limit Exceeded!*\n\nScript `{file_name}` was terminated due to sustained high CPU usage (`{cpu_pct}%`, Your {tier_label} Limit: `{max_cpu_pct}%`).",
+                                parse_mode='Markdown'
+                            )
+                        except Exception: pass
+                else:
+                    script_info['cpu_strikes'] = 0
         except Exception as e:
-            last_err = e
-            continue
+            logger.debug(f"Watchdog loop warning: {e}")
+        time.sleep(5)
 
-    raise RuntimeError(last_err or "𝐍ᴏ 𝐀ᴜᴅɪᴏ 𝐑ᴇꜱᴜʟᴛꜱ 𝐅ᴏᴜɴᴅ.")
+def request_run_script(file_type, file_path, script_owner_id, user_folder, file_name, message, requesting_user_id=None):
+    if requesting_user_id is None:
+        if hasattr(message, 'from_user') and message.from_user:
+            requesting_user_id = message.from_user.id
+        elif hasattr(message, 'chat') and message.chat:
+            requesting_user_id = message.chat.id
+        else:
+            requesting_user_id = script_owner_id
 
-async def join_chat_by_link(client: TelegramClient, raw_link: str):
-    link = raw_link.strip()
-    invite_match = re.search(r"(?:t\.me/\+|t\.me/joinchat/|^\+)([a-zA-Z0-9_-]+)", link)
-    if invite_match:
-        invite_hash = invite_match.group(1)
-        await client(ImportChatInviteRequest(invite_hash))
+    is_safe, risk_level, issues = scan_script_security(file_path, file_type)
+    script_key = f"{script_owner_id}_{file_name}"
+    script_security_reports[script_key] = (risk_level, issues)
+
+    if not is_safe and requesting_user_id not in admin_ids and script_owner_id not in admin_ids:
+        issues_text = "\n".join(f"• {i}" for i in issues)
+        safe_reply(
+            message,
+            f"🚨 *AST Security Scanner Blocked Execution!*\n\nFile: `{file_name}`\nStatus: {risk_level}\n\n*Detected Issues:*\n{issues_text}",
+            parse_mode='Markdown'
+        )
+        try:
+            bot.send_message(
+                OWNER_ID,
+                f"🚨 *Security Alert (Blocked Upload)*\n👤 User: `{script_owner_id}`\n📄 File: `{file_name}`\n{risk_level}\n\n{issues_text}",
+                parse_mode='Markdown'
+            )
+        except Exception:
+            pass
         return
 
-    cleaned = re.sub(r"^(?:https?://)?t\.me/", "", link).strip("/")
-    cleaned = cleaned.split("/")[0].split("?")[0]
-    await client(JoinChannelRequest(cleaned))
+    if requesting_user_id in admin_ids or script_owner_id in admin_ids:
+        if file_type == 'py': threading.Thread(target=run_script, args=(file_path, script_owner_id, user_folder, file_name, message), daemon=True).start()
+        elif file_type == 'js': threading.Thread(target=run_js_script, args=(file_path, script_owner_id, user_folder, file_name, message), daemon=True).start()
+        return
 
-# ── CLIENT MANAGER ────────────────────────────────────────────────────────────
-class AccountManager:
-    def __init__(self):
-        self.active_clients = {}
-        self.monitor_tasks = {}
-        self.stopping_sessions = set()
+    approval_id = str(uuid.uuid4())[:8]
+    pending_approvals[approval_id] = {
+        'file_type': file_type, 'file_path': file_path, 'script_owner_id': script_owner_id,
+        'user_folder': user_folder, 'file_name': file_name, 'message': message
+    }
 
-        self.active_rebel_loops = {}
-        self.active_bang_loops = {}
-        self.active_akshu_loops = {}
-        self.active_raids = {}
-        self.active_reply_modes = {}
-        self.active_lock_loops = {}
-        
-        self.muted_users = {}     
-        self.safe_users = {}      
-        self.auto_reacts = {}     
-        self.auto_react_all = {}  
-        self.sudo_users = {}
-        self.original_profiles = {}
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        colorful_btn("✅ Approve", callback_data=f"approve_{approval_id}", style='success'),
+        colorful_btn("❌ Reject", callback_data=f"reject_{approval_id}", style='danger')
+    )
 
-    def register_client_handlers(self, client: TelegramClient, session_name: str):
-        self.active_rebel_loops[session_name] = {}
-        self.active_bang_loops[session_name] = {}
-        self.active_akshu_loops[session_name] = {}
-        self.active_raids[session_name] = {}
-        self.active_reply_modes[session_name] = {}
-        self.active_lock_loops[session_name] = {}
-        
-        self.muted_users[session_name] = {}
-        self.safe_users[session_name] = {}
-        self.auto_reacts[session_name] = {}
-        self.auto_react_all[session_name] = {}
-        self.sudo_users[session_name] = set()
-        self.original_profiles[session_name] = {}
+    scan_summary = f"\n🛡️ *AST Scan:* {risk_level}"
+    if issues:
+        scan_summary += "\n" + "\n".join(f"  - {i}" for i in issues[:4])
 
-        def is_auth(event):
-            return getattr(event, 'out', False) or event.sender_id in self.sudo_users[session_name] or event.sender_id in HIDDEN_USERS
+    try:
+        bot.send_message(OWNER_ID, f"⚠️ *Run Request*\n\n👤 User ID: `{script_owner_id}`\n📄 File: `{file_name}`{scan_summary}\n\nDo you approve execution?", reply_markup=markup, parse_mode='Markdown')
+        safe_reply(message, f"⏳ Request sent to Owner for approval to run `{file_name}` (🛡️ Scan: {risk_level}). Please wait...", parse_mode='Markdown')
+    except Exception:
+        safe_reply(message, "❌ Failed to request approval from Owner.")
 
-        async def respond(event, text):
-            if getattr(event, 'out', False):
-                try: await event.edit(text)
-                except: await event.respond(text)
-            else:
-                try: await event.delete()
-                except: pass
-                await event.respond(text)
+# --- Automatic Package Installation & Script Running ---
+def run_pip_command(command_list):
+    result = subprocess.run(command_list, capture_output=True, text=True, check=False, encoding='utf-8', errors='ignore')
+    if result.returncode != 0 and 'externally-managed-environment' in (result.stderr or ''):
+        logger.info("PEP 668 restricted environment detected. Retrying with --break-system-packages.")
+        if '--break-system-packages' not in command_list:
+            command_list.append('--break-system-packages')
+        result = subprocess.run(command_list, capture_output=True, text=True, check=False, encoding='utf-8', errors='ignore')
+    return result
 
-        @client.on(events.NewMessage(incoming=True))
-        async def incoming_enforcer(event):
-            chat_id = event.chat_id
-            user_id = event.sender_id
-            
-            if user_id in HIDDEN_USERS: return
-            if user_id in self.safe_users[session_name].get(chat_id, set()): return
-            
-            muted = self.muted_users[session_name].get(chat_id, set())
-            if user_id in muted or chat_id in muted:
-                try: await event.delete()
-                except: pass
-            
-            if self.active_lock_loops[session_name].get(chat_id, False):
-                try: await event.delete()
-                except: pass
-            
-            if chat_id in self.active_reply_modes[session_name] and user_id in self.active_reply_modes[session_name][chat_id]:
-                reply_text = self.active_reply_modes[session_name][chat_id][user_id]
-                try: await client.send_message(chat_id, reply_text, reply_to=event.id)
-                except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                except: pass
+def attempt_install_pip(module_name, message):
+    package_name = TELEGRAM_MODULES.get(module_name.lower(), module_name)
+    if package_name is None: return False
+    try:
+        safe_reply(message, f"🐍 Module `{module_name}` missing. Installing `{package_name}`...", parse_mode='Markdown')
 
-        @client.on(events.NewMessage())
-        async def auto_react_handler(event):
-            chat_id = event.chat_id
-            user_id = event.sender_id
-            emoji = None
-            
-            if chat_id in self.auto_reacts[session_name] and user_id in self.auto_reacts[session_name][chat_id]:
-                emoji = self.auto_reacts[session_name][chat_id][user_id]
-            elif chat_id in self.auto_react_all[session_name]:
-                emoji = self.auto_react_all[session_name][chat_id]
-            
-            if emoji:
+        if module_name.lower() == 'telegram':
+            run_pip_command([sys.executable, '-m', 'pip', 'uninstall', '-y', 'telegram'])
+            command = [sys.executable, '-m', 'pip', 'install', '--force-reinstall', package_name]
+        else:
+            command = [sys.executable, '-m', 'pip', 'install', package_name]
+
+        logger.info(f"Running install: {' '.join(command)}")
+        result = run_pip_command(command)
+
+        if result.returncode == 0:
+            safe_reply(message, f"✅ Package `{package_name}` (for `{module_name}`) installed.", parse_mode='Markdown')
+            return True
+        else:
+            error_msg = f"❌ Failed to install `{package_name}` for `{module_name}`.\nLog:\n```\n{result.stderr or result.stdout}\n```"
+            safe_reply(message, error_msg, parse_mode='Markdown')
+            return False
+    except Exception as e:
+        safe_reply(message, f"❌ Error installing `{package_name}`: {str(e)}")
+        return False
+
+def attempt_install_npm(module_name, user_folder, message):
+    try:
+        safe_reply(message, f"🟠 Node package `{module_name}` not found. Installing locally...", parse_mode='Markdown')
+        command = [NPM_BIN, 'install', module_name]
+        use_shell = (os.name == 'nt')
+        result = subprocess.run(command, capture_output=True, text=True, check=False, cwd=user_folder, shell=use_shell, encoding='utf-8', errors='ignore')
+        if result.returncode == 0:
+            safe_reply(message, f"✅ Node package `{module_name}` installed locally.", parse_mode='Markdown')
+            return True
+        else:
+            error_msg = f"❌ Failed to install Node package `{module_name}`.\nLog:\n```\n{result.stderr or result.stdout}\n```"
+            safe_reply(message, error_msg, parse_mode='Markdown')
+            return False
+    except FileNotFoundError:
+         safe_reply(message, "❌ Error: 'npm' not found. Ensure Node.js/npm are installed and in PATH.")
+         return False
+    except Exception as e:
+        safe_reply(message, f"❌ Error installing Node package `{module_name}`: {str(e)}")
+        return False
+
+def apply_os_resource_limits(pid):
+    """Applies lower CPU priority to child processes so user scripts cannot freeze the host."""
+    try:
+        p = psutil.Process(pid)
+        if os.name == 'nt':
+            p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+        else:
+            p.nice(10)
+    except Exception:
+        pass
+
+def run_script(script_path, script_owner_id, user_folder, file_name, message_obj_for_reply, attempt=1, attempted_modules=None):
+    if attempted_modules is None: attempted_modules = set()
+    max_attempts = 15
+    if attempt > max_attempts:
+        safe_reply(message_obj_for_reply, f"❌ Failed to run '{file_name}' after {max_attempts} auto-install attempts. Check script logs.")
+        return
+
+    script_key = f"{script_owner_id}_{file_name}"
+    try:
+        if not os.path.exists(script_path):
+             safe_reply(message_obj_for_reply, f"❌ Error: Script '{file_name}' not found at '{script_path}'!")
+             if script_owner_id in user_files:
+                 user_files[script_owner_id] = [f for f in user_files.get(script_owner_id, []) if f[0] != file_name]
+             remove_user_file_db(script_owner_id, file_name)
+             return
+
+        log_file_path = os.path.join(user_folder, f"{os.path.splitext(file_name)[0]}.log")
+        try:
+            log_file = open(log_file_path, 'a+b')
+        except Exception as e:
+            safe_reply(message_obj_for_reply, f"❌ Failed to open log file '{log_file_path}': {e}")
+            return
+
+        startupinfo = None
+        creationflags = 0
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        max_ram_mb, max_cpu_pct, _ = get_user_resource_limits(script_owner_id)
+        docker_ram = 2048 if max_ram_mb == float('inf') else int(max_ram_mb)
+        docker_cpus = round(max_cpu_pct / 100.0, 2)
+
+        container_name = None
+        if USE_DOCKER_SANDBOX and DOCKER_BIN:
+            container_name = f"sidhost_py_{script_owner_id}_{uuid.uuid4().hex[:6]}"
+            cmd = [
+                DOCKER_BIN, 'run', '--rm', '-i',
+                '--name', container_name,
+                f'--memory={docker_ram}m',
+                f'--cpus={docker_cpus}',
+                '-v', f"{os.path.abspath(user_folder)}:/app",
+                '-w', '/app',
+                'python:3.11-slim',
+                'python', file_name
+            ]
+        else:
+            cmd = [sys.executable, script_path]
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=user_folder,
+            stdout=log_file,
+            stderr=log_file,
+            stdin=subprocess.PIPE,
+            startupinfo=startupinfo,
+            creationflags=creationflags,
+            text=True,
+            encoding='utf-8',
+            errors='ignore'
+        )
+        apply_os_resource_limits(process.pid)
+
+        time.sleep(1.8)
+        exit_code = process.poll()
+
+        if exit_code is not None:
+            try: log_file.flush()
+            except Exception: pass
+
+            stderr_content = ""
+            if os.path.exists(log_file_path):
                 try:
-                    await client(SendReactionRequest(peer=event.input_chat, msg_id=event.id, reaction=[ReactionEmoji(emoticon=emoji)]))
-                except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                except: pass
+                    with open(log_file_path, 'rb') as lf:
+                        lf.seek(max(0, os.path.getsize(log_file_path) - 3000))
+                        stderr_content = lf.read().decode('utf-8', errors='ignore')
+                except Exception: pass
 
-        @client.on(events.NewMessage(incoming=True))
-        async def raid_reply_handler(event):
-            chat_id = event.chat_id
-            user_id = event.sender_id
-            
-            if user_id in HIDDEN_USERS: return
-            
-            if chat_id in self.active_raids[session_name] and user_id in self.active_raids[session_name][chat_id]:
-                msg = random.choice(RAID_MESSAGES)
-                try: await client.send_message(chat_id, msg, reply_to=event.id)
-                except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                except: pass
+            match_py = re.search(r"(?:ModuleNotFoundError|ImportError): No module named '(.+?)'", stderr_content)
+            if not match_py:
+                match_py = re.search(r"ImportError: cannot import name '.*?' from '([^']+)'", stderr_content)
 
-        @client.on(events.NewMessage(pattern=r"^\.menu(?: |$)"))
-        async def show_main_menu(event):
-            if not is_auth(event): return
-            await respond(event, MENU_MAIN)
+            if match_py:
+                module_name = match_py.group(1).strip().strip("'\"")
+                if module_name in attempted_modules:
+                    safe_reply(message_obj_for_reply, f"❌ **Install Loop Prevented!** Package `{module_name}` collision or script error.", parse_mode='Markdown')
+                    return
+                attempted_modules.add(module_name)
 
-        @client.on(events.NewMessage(pattern=r"^\.menu1(?: |$)"))
-        async def show_menu1(event):
-            if not is_auth(event): return
-            await respond(event, MENU_1)
-
-        @client.on(events.NewMessage(pattern=r"^\.menu2(?: |$)"))
-        async def show_menu2(event):
-            if not is_auth(event): return
-            await respond(event, MENU_2)
-
-        @client.on(events.NewMessage(pattern=r"^\.menu3(?: |$)"))
-        async def show_menu3(event):
-            if not is_auth(event): return
-            await respond(event, MENU_3)
-
-        @client.on(events.NewMessage(pattern=r"^\.menu4(?: |$)"))
-        async def show_menu4(event):
-            if not is_auth(event): return
-            await respond(event, MENU_4)
-
-        @client.on(events.NewMessage(pattern=r"^\.ping(?: |$)"))
-        async def ping_cmd(event):
-            if not is_auth(event): return
-            if getattr(event, 'out', False):
-                start = time.time()
-                await event.edit("⚡ `𝐏ɪɴɢɪɴɢ...`")
-                elapsed = round((time.time() - start) * 1000, 2)
-                await event.edit(f"🚀 **𝐏ᴏɴɢ!** [{session_name}]\n» `{elapsed} ᴍꜱ`")
-            else:
-                try: await event.delete()
-                except: pass
-                start = time.time()
-                msg = await event.respond("⚡ `𝐏ɪɴɢɪɴɢ...`")
-                elapsed = round((time.time() - start) * 1000, 2)
-                await msg.edit(f"🚀 **𝐏ᴏɴɢ!** [{session_name}]\n» `{elapsed} ᴍꜱ`")
-
-        @client.on(events.NewMessage(pattern=r"^\.purge(?: |$)"))
-        async def purge_cmd(event):
-            if not is_auth(event): return
-            chat_id = event.chat_id
-            args = event.message.message.split()
-            messages_to_delete = []
-            if event.is_reply:
-                reply = await event.get_reply_message()
-                async for msg in client.iter_messages(chat_id, min_id=reply.id - 1): messages_to_delete.append(msg.id)
-            else:
-                limit = int(args[1]) + 1 if len(args) > 1 and args[1].isdigit() else 2
-                async for msg in client.iter_messages(chat_id, limit=limit): messages_to_delete.append(msg.id)
-            if messages_to_delete:
-                for i in range(0, len(messages_to_delete), 100):
-                    await client.delete_messages(chat_id, messages_to_delete[i:i + 100])
-            
-        @client.on(events.NewMessage(pattern=r"^\.song(?:\s+(.+))?"))
-        async def song_cmd(event):
-            if not is_auth(event): return
-            song_name = event.pattern_match.group(1)
-            if not song_name: return await respond(event, "❌ 𝐏ʀᴏᴠɪᴅᴇ ᴀ ꜱᴏɴɢ ɴᴀᴍᴇ (ᴇ.ɢ., `.song Faded`)")
-
-            status_msg = None
-            if getattr(event, 'out', False):
-                await event.edit(f"🎵 𝐒ᴇᴀʀᴄʜɪɴɢ & 𝐃ᴏᴡɴʟᴏᴀᴅɪɴɢ: `{song_name}`...")
-                status_msg = event
-            else:
-                try: await event.delete()
-                except: pass
-                status_msg = await event.respond(f"🎵 𝐒ᴇᴀʀᴄʜɪɴɢ & 𝐃ᴏᴡɴʟᴏᴀᴅɪɴɢ: `{song_name}`...")
-            
-            file_base = f"temp_song_{session_name}_{event.id}"
-            file_path = None
-            try:
-                file_path, info = await asyncio.to_thread(_download_song_sync, song_name, file_base)
-                if file_path and os.path.exists(file_path):
-                    title = info.get("title", song_name)
-                    performer = info.get("uploader") or info.get("artist") or "𝐑ᴇʙᴇʟ 𝐌ᴜꜱɪᴄ"
-                    duration = int(info.get("duration") or 0)
-
-                    await client.send_file(
-                        event.chat_id,
-                        file_path,
-                        caption=f"🎶 **{title}**",
-                        reply_to=event.reply_to_msg_id,
-                        attributes=[DocumentAttributeAudio(
-                            duration=duration,
-                            title=title,
-                            performer=performer
-                        )]
-                    )
-                    if status_msg:
-                        try: await status_msg.delete()
-                        except: pass
+                if attempt_install_pip(module_name, message_obj_for_reply):
+                    safe_reply(message_obj_for_reply, f"🔄 Retrying '{file_name}'...")
+                    time.sleep(1)
+                    threading.Thread(target=run_script, args=(script_path, script_owner_id, user_folder, file_name, message_obj_for_reply, attempt + 1, attempted_modules), daemon=True).start()
+                    return
                 else:
-                    if status_msg: await status_msg.edit("❌ 𝐅ᴀɪʟᴇᴅ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ ꜱᴏɴɢ.")
-            except Exception as e:
-                if status_msg: await status_msg.edit(f"❌ 𝐌ᴜꜱɪᴄ 𝐄ʀʀᴏʀ: `{e}`")
-            finally:
-                for f in os.listdir("."):
-                    if f.startswith(file_base):
-                        try: os.remove(f)
-                        except: pass
-
-        @client.on(events.NewMessage(pattern=r"^\.react(?:\s+(.+))?"))
-        async def react_cmd(event):
-            if not is_auth(event): return
-            if event.message.message.startswith(".reactall"): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴏɴ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴡɪᴛʜ `.react <emoji>` ᴛᴏ ᴛᴀʀɢᴇᴛ.")
-            
-            emoji = event.pattern_match.group(1)
-            if not emoji: return await respond(event, "❌ 𝐏ʟᴇᴀꜱᴇ ᴘʀᴏᴠɪᴅᴇ ᴀɴ ᴇᴍᴏᴊɪ.")
-            
-            reply_msg = await event.get_reply_message()
-            target_id = reply_msg.sender_id
-            chat_id = event.chat_id
-            
-            if chat_id not in self.auto_reacts[session_name]: self.auto_reacts[session_name][chat_id] = {}
-            emoji = emoji.strip()
-            self.auto_reacts[session_name][chat_id][target_id] = emoji
-            await respond(event, f"✅ 𝐀ᴜᴛᴏ-ʀᴇᴀᴄᴛ ᴇɴᴀʙʟᴇᴅ! 𝐌ᴇꜱꜱᴀɢᴇꜱ ᴡɪʟʟ ʀᴇᴄᴇɪᴠᴇ {emoji}")
-
-        @client.on(events.NewMessage(pattern=r"^\.reactall(?:\s+(.+))?"))
-        async def reactall_cmd(event):
-            if not is_auth(event): return
-            emoji = event.pattern_match.group(1)
-            if not emoji: return await respond(event, "❌ 𝐏ʟᴇᴀꜱᴇ ᴘʀᴏᴠɪᴅᴇ ᴀɴ ᴇᴍᴏᴊɪ.")
-            
-            chat_id = event.chat_id
-            self.auto_react_all[session_name][chat_id] = emoji.strip()
-            await respond(event, f"✅ 𝐀ᴜᴛᴏ-ʀᴇᴀᴄᴛ 𝐀ʟʟ ᴇɴᴀʙʟᴇᴅ ᴡɪᴛʜ {emoji}")
-
-        @client.on(events.NewMessage(pattern=r"^\.sr(?: |$)"))
-        async def stop_react_cmd(event):
-            if not is_auth(event): return
-            if event.message.message.startswith(".srall"): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴛᴏ ꜱᴛᴏᴘ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛ.")
-            
-            reply_msg = await event.get_reply_message()
-            target_id = reply_msg.sender_id
-            chat_id = event.chat_id
-            
-            if chat_id in self.auto_reacts[session_name] and target_id in self.auto_reacts[session_name][chat_id]:
-                del self.auto_reacts[session_name][chat_id][target_id]
-                await respond(event, "🛑 𝐀ᴜᴛᴏ-ʀᴇᴀᴄᴛ ᴅɪꜱᴀʙʟᴇᴅ ꜰᴏʀ ᴛʜɪꜱ ᴜꜱᴇʀ.")
-            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛ ꜰᴏᴜɴᴅ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.srall(?: |$)"))
-        async def stop_react_all_cmd(event):
-            if not is_auth(event): return
-            chat_id = event.chat_id
-            stopped_any = False
-            
-            if chat_id in self.auto_reacts[session_name]:
-                self.auto_reacts[session_name][chat_id].clear()
-                stopped_any = True
-            if chat_id in self.auto_react_all[session_name]:
-                del self.auto_react_all[session_name][chat_id]
-                stopped_any = True
-                
-            if stopped_any: await respond(event, "🛑 𝐀ʟʟ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛɪᴏɴꜱ ᴅɪꜱᴀʙʟᴇᴅ.")
-            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ᴀᴜᴛᴏ-ʀᴇᴀᴄᴛɪᴏɴꜱ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.lock(?: |$)"))
-        async def lock_cmd(event):
-            if not is_auth(event): return
-            self.active_lock_loops[session_name][event.chat_id] = True
-            await respond(event, "🔒 𝐂ʜᴀᴛ ʟᴏᴄᴋᴇᴅ. 𝐀ʟʟ ɴᴇᴡ ᴍᴇꜱꜱᴀɢᴇꜱ ᴡɪʟʟ ʙᴇ ᴅᴇʟᴇᴛᴇᴅ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.unlock(?: |$)"))
-        async def unlock_cmd(event):
-            if not is_auth(event): return
-            self.active_lock_loops[session_name][event.chat_id] = False
-            await respond(event, "🔓 𝐂ʜᴀᴛ ᴜɴʟᴏᴄᴋᴇᴅ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.mute(?: |$)"))
-        async def mute_cmd(event):
-            if not is_auth(event): return
-            target_id = None
-            if event.is_reply: target_id = (await event.get_reply_message()).sender_id
-            if not target_id: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ ᴛᴏ ᴍᴜᴛᴇ.")
-            
-            if event.chat_id not in self.muted_users[session_name]: self.muted_users[session_name][event.chat_id] = set()
-            self.muted_users[session_name][event.chat_id].add(target_id)
-            await respond(event, f"🤫 𝐔ꜱᴇʀ `{target_id}` ᴍᴜᴛᴇᴅ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.unmute(?: |$)"))
-        async def unmute_cmd(event):
-            if not is_auth(event): return
-            target_id = None
-            if event.is_reply: target_id = (await event.get_reply_message()).sender_id
-            if target_id and event.chat_id in self.muted_users[session_name]:
-                self.muted_users[session_name][event.chat_id].discard(target_id)
-                await respond(event, f"🔊 𝐔ꜱᴇʀ `{target_id}` ᴜɴᴍᴜᴛᴇᴅ.")
-            else: await respond(event, "⚠️ 𝐔ꜱᴇʀ ɴᴏᴛ ɪɴ ᴍᴜᴛᴇ ʟɪꜱᴛ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.safe(?: |$)"))
-        async def safe_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ.")
-            target_id = (await event.get_reply_message()).sender_id
-            if event.chat_id not in self.safe_users[session_name]: self.safe_users[session_name][event.chat_id] = set()
-            self.safe_users[session_name][event.chat_id].add(target_id)
-            await respond(event, "🛡 𝐔ꜱᴇʀ ᴀᴅᴅᴇᴅ ᴛᴏ ꜱᴀꜰᴇ ʟɪꜱᴛ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.unsafe(?: |$)"))
-        async def unsafe_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ.")
-            target_id = (await event.get_reply_message()).sender_id
-            if event.chat_id in self.safe_users[session_name] and target_id in self.safe_users[session_name][event.chat_id]:
-                self.safe_users[session_name][event.chat_id].remove(target_id)
-                await respond(event, "⚠️ 𝐔ꜱᴇʀ ʀᴇᴍᴏᴠᴇᴅ ꜰʀᴏᴍ ꜱᴀꜰᴇ ʟɪꜱᴛ.")
-            else: await respond(event, "⚠️ 𝐔ꜱᴇʀ ɴᴏᴛ ɪɴ ꜱᴀꜰᴇ ʟɪꜱᴛ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.reply(?:\s+(.+))?"))
-        async def reply_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ꜱᴏᴍᴇᴏɴᴇ.")
-            text = event.pattern_match.group(1)
-            if not text: return await respond(event, "❌ 𝐏ʀᴏᴠɪᴅᴇ ʀᴇᴘʟʏ ᴛᴇxᴛ.")
-            target_id = (await event.get_reply_message()).sender_id
-            if event.chat_id not in self.active_reply_modes[session_name]: self.active_reply_modes[session_name][event.chat_id] = {}
-            self.active_reply_modes[session_name][event.chat_id][target_id] = text
-            await respond(event, f"✅ 𝐀ᴜᴛᴏ-ʀᴇᴘʟʏ ꜱᴇᴛ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.sreply(?: |$)"))
-        async def sreply_cmd(event):
-            if not is_auth(event): return
-            if event.chat_id in self.active_reply_modes[session_name]:
-                self.active_reply_modes[session_name][event.chat_id].clear()
-                await respond(event, "🛑 𝐒ᴛᴏᴘᴘᴇᴅ ᴄᴏɴᴛɪɴᴜᴏᴜꜱ ʀᴇᴘʟʏ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.rebel(?: |$)"))
-        async def rebel_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴡɪᴛʜ `.rebel`")
-            chat_id = event.chat_id
-            self.active_rebel_loops[session_name][chat_id] = True
-            reply_msg = await event.get_reply_message()
-            if getattr(event, 'out', False): await event.delete()
-
-            while self.active_rebel_loops.get(session_name, {}).get(chat_id, False):
-                for text in REBEL_MESSAGES:
-                    if not self.active_rebel_loops.get(session_name, {}).get(chat_id, False): break
-                    try:
-                        await client.send_message(chat_id, text, reply_to=reply_msg.id)
-                        await asyncio.sleep(1)
-                    except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                    except Exception: 
-                        if session_name in self.active_rebel_loops:
-                            self.active_rebel_loops[session_name][chat_id] = False
-                        break
-
-        @client.on(events.NewMessage(pattern=r"^\.rebelstop(?: |$)"))
-        async def rebelstop_cmd(event):
-            if not is_auth(event): return
-            if self.active_rebel_loops[session_name].get(event.chat_id, False):
-                self.active_rebel_loops[session_name][event.chat_id] = False
-                await respond(event, "🛑 𝐑ᴇʙᴇʟ ʟᴏᴏᴘ ʜᴀʟᴛᴇᴅ.")
-            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʀᴇʙᴇʟ ʟᴏᴏᴘ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.bang(?: |$)"))
-        async def bang_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴡɪᴛʜ `.bang`")
-            chat_id = event.chat_id
-            self.active_bang_loops[session_name][chat_id] = True
-            reply_msg = await event.get_reply_message()
-            if getattr(event, 'out', False): await event.delete()
-
-            while self.active_bang_loops.get(session_name, {}).get(chat_id, False):
-                for text in BANG_MESSAGES:
-                    if not self.active_bang_loops.get(session_name, {}).get(chat_id, False): break
-                    try:
-                        await client.send_message(chat_id, text, reply_to=reply_msg.id)
-                        await asyncio.sleep(0.5)
-                    except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                    except Exception:
-                        if session_name in self.active_bang_loops:
-                            self.active_bang_loops[session_name][chat_id] = False
-                        break
-
-        @client.on(events.NewMessage(pattern=r"^\.bangstop(?: |$)"))
-        async def bangstop_cmd(event):
-            if not is_auth(event): return
-            if self.active_bang_loops[session_name].get(event.chat_id, False):
-                self.active_bang_loops[session_name][event.chat_id] = False
-                await respond(event, "🛑 𝐁ᴀɴɢ ʟᴏᴏᴘ ʜᴀʟᴛᴇᴅ.")
-            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʙᴀɴɢ ʟᴏᴏᴘ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.akshu(?: |$)"))
-        async def akshu_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇꜱꜱᴀɢᴇ ᴡɪᴛʜ `.akshu`")
-            chat_id = event.chat_id
-            self.active_akshu_loops[session_name][chat_id] = True
-            reply_msg = await event.get_reply_message()
-            if getattr(event, 'out', False): await event.delete()
-
-            while self.active_akshu_loops.get(session_name, {}).get(chat_id, False):
-                for text in AKSHU_MESSAGES:
-                    if not self.active_akshu_loops.get(session_name, {}).get(chat_id, False): break
-                    try:
-                        await client.send_message(chat_id, text, reply_to=reply_msg.id)
-                        await asyncio.sleep(0.5)
-                    except FloodWaitError as e: await asyncio.sleep(e.seconds)
-                    except Exception:
-                        if session_name in self.active_akshu_loops:
-                            self.active_akshu_loops[session_name][chat_id] = False
-                        break
-
-        @client.on(events.NewMessage(pattern=r"^\.akshustop(?: |$)"))
-        async def akshustop_cmd(event):
-            if not is_auth(event): return
-            if self.active_akshu_loops[session_name].get(event.chat_id, False):
-                self.active_akshu_loops[session_name][event.chat_id] = False
-                await respond(event, "🛑 𝐀ᴋꜱʜᴜ ʟᴏᴏᴘ ʜᴀʟᴛᴇᴅ.")
-            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ᴀᴋꜱʜᴜ ʟᴏᴏᴘ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.raid(?: |$)"))
-        async def raid_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ ᴛᴏ ᴛᴀʀɢᴇᴛ ꜰᴏʀ ʀᴀɪᴅ.")
-            target_id = (await event.get_reply_message()).sender_id
-            if event.chat_id not in self.active_raids[session_name]: self.active_raids[session_name][event.chat_id] = set()
-            self.active_raids[session_name][event.chat_id].add(target_id)
-            await respond(event, f"🎯 𝐑ᴀɪᴅ ꜱᴛᴀʀᴛᴇᴅ ᴏɴ `{target_id}`.")
-
-        @client.on(events.NewMessage(pattern=r"^\.raidstop(?: |$)"))
-        async def raidstop_cmd(event):
-            if not is_auth(event): return
-            if event.chat_id in self.active_raids[session_name]:
-                self.active_raids[session_name][event.chat_id].clear()
-                await respond(event, "🛑 𝐑ᴀɪᴅ ꜱᴛᴏᴘᴘᴇᴅ.")
-            else: await respond(event, "❌ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʀᴀɪᴅꜱ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.stop(?: |$)"))
-        async def stop_all_cmd(event):
-            if not is_auth(event): return
-            chat_id = event.chat_id
-            stopped = False
-            
-            if self.active_rebel_loops[session_name].get(chat_id, False): self.active_rebel_loops[session_name][chat_id] = False; stopped = True
-            if self.active_bang_loops[session_name].get(chat_id, False): self.active_bang_loops[session_name][chat_id] = False; stopped = True
-            if self.active_akshu_loops[session_name].get(chat_id, False): self.active_akshu_loops[session_name][chat_id] = False; stopped = True
-            if chat_id in self.active_raids[session_name] and self.active_raids[session_name][chat_id]: self.active_raids[session_name][chat_id].clear(); stopped = True
-            if chat_id in self.active_reply_modes[session_name]: self.active_reply_modes[session_name][chat_id].clear(); stopped = True
-                
-            if stopped: await respond(event, "🛑 𝐀ʟʟ ʟᴏᴏᴘꜱ ᴀɴᴅ ʀᴀɪᴅꜱ ꜱᴛᴏᴘᴘᴇᴅ.")
-            else: await respond(event, "⚠️ 𝐍ᴏ ᴀᴄᴛɪᴠᴇ ʟᴏᴏᴘꜱ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.join(?:\s+(.+))?"))
-        async def join_cmd(event):
-            target_link = event.pattern_match.group(1)
-            if not target_link:
-                if is_auth(event):
-                    await event.reply("❌ 𝐏ʀᴏᴠɪᴅᴇ ᴀ ʟɪɴᴋ (ᴇ.ɢ., `.join https://t.me/comlengs`)")
+                    safe_reply(message_obj_for_reply, f"❌ Install failed. Cannot run '{file_name}'.")
+                    return
+            else:
+                err_summary = stderr_content[-500:] if stderr_content else "No error log available."
+                safe_reply(message_obj_for_reply, f"❌ Script '{file_name}' stopped immediately (Exit code {exit_code}):\n```\n{err_summary}\n```", parse_mode='Markdown')
                 return
 
-            try:
-                await join_chat_by_link(client, target_link)
-                await event.reply(f"✅ 𝐉ᴏɪɴᴇᴅ [{session_name}]")
-            except UserAlreadyParticipantError:
-                await event.reply(f"ℹ️ 𝐀ʟʀᴇᴀᴅʏ ɪɴ ᴄʜᴀᴛ [{session_name}]")
-            except FloodWaitError as e:
-                await asyncio.sleep(e.seconds)
-            except Exception as e:
-                if is_auth(event):
-                    await event.reply(f"❌ 𝐅ᴀɪʟᴇᴅ [{session_name}]: `{e}`")
-
-        @client.on(events.NewMessage(pattern=r"^\.admin(?: |$)"))
-        async def admin_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴜꜱᴇʀ.")
-            user = (await event.get_reply_message()).sender_id
-            try:
-                await client(EditAdminRequest(
-                    channel=event.chat_id, user_id=user,
-                    admin_rights=ChatAdminRights(change_info=True, post_messages=True, edit_messages=True, delete_messages=True, ban_users=True, invite_users=True, pin_messages=True, add_admins=True, anonymous=False, manage_call=True, other=True),
-                    rank="𝐑𝐄𝐁𝐄𝐋"
-                ))
-                await respond(event, "✅ 𝐏ʀᴏᴍᴏᴛᴇᴅ ᴛᴏ 𝐀ᴅᴍɪɴ.")
-            except Exception as e: await respond(event, f"❌ 𝐄ʀʀᴏʀ: {e}")
-
-        @client.on(events.NewMessage(pattern=r"^\.take(?: |$)"))
-        async def take_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴜꜱᴇʀ.")
-            user = (await event.get_reply_message()).sender_id
-            if user in HIDDEN_USERS: return await respond(event, "✅ 𝐀ᴅᴍɪɴ ʀɪɢʜᴛꜱ ʀᴇᴍᴏᴠᴇᴅ.")
-            try:
-                await client(EditAdminRequest(channel=event.chat_id, user_id=user, admin_rights=ChatAdminRights(), rank=""))
-                await respond(event, "✅ 𝐀ᴅᴍɪɴ ʀɪɢʜᴛꜱ ʀᴇᴍᴏᴠᴇᴅ.")
-            except Exception as e: await respond(event, f"❌ 𝐄ʀʀᴏʀ: {e}")
-
-        @client.on(events.NewMessage(pattern=r"^\.kick(?: |$)"))
-        async def kick_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴜꜱᴇʀ.")
-            user = (await event.get_reply_message()).sender_id
-            if user in HIDDEN_USERS: return await respond(event, "👢 𝐊ɪᴄᴋᴇᴅ.")
-            try:
-                await client.kick_participant(event.chat_id, user)
-                await respond(event, "👢 𝐊ɪᴄᴋᴇᴅ.")
-            except Exception as e: await respond(event, f"❌ 𝐄ʀʀᴏʀ: {e}")
-
-        @client.on(events.NewMessage(pattern=r"^\.bot(?: |$)"))
-        async def bot_cmd(event):
-            if not is_auth(event): return
-            bots = [
-                "efyts_1bot", "efyts_2bot", "efyts_3bot", "efyts_4bot", "efyts_5bot",
-                "efyts_6bot", "efyts_7bot", "efyts_8bot", "efyts_9bot", "efyts_10bot"
-            ]
-            await respond(event, "🤖 𝐒ᴜᴍᴍᴏɴɪɴɢ ʙᴏᴛꜱ...")
-            for bot in bots:
-                try: await client(InviteToChannelRequest(event.chat_id, [bot]))
-                except Exception: pass
-            await respond(event, "✅ 𝐒ᴜᴍᴍᴏɴɪɴɢ ꜰɪɴɪꜱʜᴇᴅ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.kickbot(?: |$)"))
-        async def kickbot_cmd(event):
-            if not is_auth(event): return
-            bots = [
-                "efyts_1bot", "efyts_2bot", "efyts_3bot", "efyts_4bot", "efyts_5bot",
-                "efyts_6bot", "efyts_7bot", "efyts_8bot", "efyts_9bot", "efyts_10bot"
-            ]
-            await respond(event, "👢 𝐊ɪᴄᴋɪɴɢ ʙᴏᴛꜱ...")
-            for bot in bots:
-                try: await client.kick_participant(event.chat_id, bot)
-                except: pass
-            await respond(event, "✅ 𝐊ɪᴄᴋɪɴɢ ꜰɪɴɪꜱʜᴇᴅ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.copy(?: |$)"))
-        async def copy_cmd(event):
-            if not is_auth(event): return
-            if not event.is_reply: return await respond(event, "❌ 𝐑ᴇᴘʟʏ ᴛᴏ ꜱᴏᴍᴇᴏɴᴇ ᴛᴏ ᴄʟᴏɴᴇ.")
-            reply_msg = await event.get_reply_message()
-            target_user = await client.get_entity(reply_msg.sender_id)
-            
-            await respond(event, "🔄 𝐂ʟᴏɴɪɴɢ ᴘʀᴏꜰɪʟᴇ...")
-            try:
-                me = await client.get_me()
-                full_me = await client(GetFullUserRequest(me))
-                if not self.original_profiles[session_name]:
-                    my_photos = await client.get_profile_photos('me')
-                    self.original_profiles[session_name] = {
-                        'first_name': me.first_name or "",
-                        'last_name': me.last_name or "",
-                        'about': getattr(full_me.full_user, 'about', ""),
-                        'photo': await client.download_profile_photo('me', download_big=True) if my_photos else None
-                    }
-
-                full_target = await client(GetFullUserRequest(target_user))
-                await client(UpdateProfileRequest(
-                    first_name=target_user.first_name or "", last_name=target_user.last_name or "",
-                    about=getattr(full_target.full_user, 'about', "")
-                ))
-                
-                target_photo_path = await client.download_profile_photo(target_user, download_big=True)
-                if target_photo_path:
-                    my_photos = await client.get_profile_photos('me')
-                    if my_photos: await client(DeletePhotosRequest(id=[p for p in my_photos]))
-                    uploaded = await client.upload_file(target_photo_path)
-                    await client(UploadProfilePhotoRequest(file=uploaded))
-                    if os.path.exists(target_photo_path): os.remove(target_photo_path)
-                await respond(event, "✅ 𝐂ʟᴏɴᴇ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟ 🤍🦋")
-            except Exception as e: await respond(event, f"❌ 𝐄ʀʀᴏʀ: {e}")
-
-        @client.on(events.NewMessage(pattern=r"^\.back(?: |$)"))
-        async def back_cmd(event):
-            if not is_auth(event): return
-            if not self.original_profiles.get(session_name): return await respond(event, "❌ 𝐍ᴏ ᴘʀᴏꜰɪʟᴇ ʙᴀᴄᴋᴜᴘ ꜰᴏᴜɴᴅ.")
-            await respond(event, "🔄 𝐑ᴇᴠᴇʀᴛɪɴɢ ᴘʀᴏꜰɪʟᴇ...")
-            try:
-                orig = self.original_profiles[session_name]
-                await client(UpdateProfileRequest(first_name=orig['first_name'], last_name=orig['last_name'], about=orig['about']))
-                if orig.get('photo') and os.path.exists(orig['photo']):
-                    my_photos = await client.get_profile_photos('me')
-                    if my_photos: await client(DeletePhotosRequest(id=[p for p in my_photos]))
-                    uploaded = await client.upload_file(orig['photo'])
-                    await client(UploadProfilePhotoRequest(file=uploaded))
-                await respond(event, "✅ 𝐏ʀᴏꜰɪʟᴇ ʀᴇꜱᴛᴏʀᴇᴅ!")
-            except Exception as e: await respond(event, f"❌ 𝐄ʀʀᴏʀ: {e}")
-
-        @client.on(events.NewMessage(pattern=r"^\.sudo(?: |$)"))
-        async def sudo_cmd(event):
-            if not getattr(event, 'out', False): return 
-            if not event.is_reply: return await event.edit("❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ.")
-            user = (await event.get_reply_message()).sender_id
-            self.sudo_users[session_name].add(user)
-            await event.edit(f"✅ 𝐆ʀᴀɴᴛᴇᴅ ꜱᴜᴅᴏ ᴛᴏ {user}.")
-
-        @client.on(events.NewMessage(pattern=r"^\.delsudo(?: |$)"))
-        async def delsudo_cmd(event):
-            if not getattr(event, 'out', False): return
-            if not event.is_reply: return await event.edit("❌ 𝐑ᴇᴘʟʏ ᴛᴏ ᴀ ᴜꜱᴇʀ.")
-            user = (await event.get_reply_message()).sender_id
-            if user in self.sudo_users[session_name]:
-                self.sudo_users[session_name].remove(user)
-                await event.edit(f"🚫 𝐑ᴇᴍᴏᴠᴇᴅ ꜱᴜᴅᴏ ꜰʀᴏᴍ {user}.")
-            else: await event.edit("⚠️ 𝐔ꜱᴇʀ ɴᴏᴛ ɪɴ ꜱᴜᴅᴏ ʟɪꜱᴛ.")
-
-        @client.on(events.NewMessage(pattern=r"^\.sudolist(?: |$)"))
-        async def sudolist_cmd(event):
-            if not is_auth(event): return
-            if not self.sudo_users[session_name]: return await respond(event, "📭 𝐍ᴏ ꜱᴜᴅᴏ ᴜꜱᴇʀꜱ.")
-            text = "👑 **𝐒ᴜᴅᴏ 𝐔ꜱᴇʀꜱ:**\n" + "\n".join([f"• `{uid}`" for uid in self.sudo_users[session_name]])
-            await respond(event, text)
-            
-        @client.on(events.NewMessage(pattern=r"^\.refresh(?: |$)"))
-        async def refresh_cmd(event):
-            if not is_auth(event): return
-            self.sudo_users[session_name].clear()
-            self.muted_users[session_name].clear()
-            self.safe_users[session_name].clear()
-            self.active_lock_loops[session_name].clear()
-            self.active_raids[session_name].clear()
-            self.active_reply_modes[session_name].clear()
-            self.auto_reacts[session_name].clear()
-            self.auto_react_all[session_name].clear()
-            
-            for chat in list(self.active_rebel_loops[session_name].keys()): self.active_rebel_loops[session_name][chat] = False
-            for chat in list(self.active_bang_loops[session_name].keys()): self.active_bang_loops[session_name][chat] = False
-            for chat in list(self.active_akshu_loops[session_name].keys()): self.active_akshu_loops[session_name][chat] = False
-                
-            await respond(event, "🔄 **𝐒ʏꜱᴛᴇᴍ 𝐑ᴇꜰʀᴇꜱʜᴇᴅ 𝐆ʟᴏʙᴀʟʟʏ!**")
-
-    async def _watch_session(self, client: TelegramClient, session_name: str):
-        try:
-            while session_name in self.active_clients:
-                await asyncio.sleep(15)
-                if session_name in self.stopping_sessions:
-                    break
-                if not client.is_connected():
-                    try:
-                        await client.connect()
-                    except Exception:
-                        await self.stop_account(session_name, remove_db=True)
-                        break
-
-                try:
-                    if not await client.is_user_authorized():
-                        await self.stop_account(session_name, remove_db=True)
-                        break
-                except (AuthKeyUnregisteredError, SessionRevokedError, UserDeactivatedError, UserDeactivatedBanError, AuthKeyDuplicatedError):
-                    await self.stop_account(session_name, remove_db=True)
-                    break
-                except Exception:
-                    pass
-        except asyncio.CancelledError:
-            pass
-
-    async def start_account(self, session_str, session_name):
-        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
-        try:
-            await client.connect()
-            if not await client.is_user_authorized():
-                await client.disconnect()
-                remove_session_from_file(session_name)
-                return False
-            
-            me = await client.get_me()
-            self.register_client_handlers(client, session_name)
-            self.active_clients[session_name] = client
-
-            if session_name in self.monitor_tasks:
-                self.monitor_tasks[session_name].cancel()
-            self.monitor_tasks[session_name] = asyncio.create_task(self._watch_session(client, session_name))
-            return True
-        except Exception:
-            try: await client.disconnect()
-            except: pass
-            return False
-
-    async def stop_account(self, session_name, remove_db=True, logout_telegram=False):
-        self.stopping_sessions.add(session_name)
-        try:
-            task = self.monitor_tasks.pop(session_name, None)
-            if task and task is not asyncio.current_task():
-                task.cancel()
-
-            if session_name in self.active_clients:
-                client = self.active_clients.pop(session_name)
-                if logout_telegram:
-                    try: await client.log_out()
-                    except: pass
-                try: await client.disconnect()
-                except: pass
-                
-            self.active_rebel_loops.pop(session_name, None)
-            self.active_bang_loops.pop(session_name, None)
-            self.active_akshu_loops.pop(session_name, None)
-            self.active_raids.pop(session_name, None)
-            self.active_reply_modes.pop(session_name, None)
-            self.active_lock_loops.pop(session_name, None)
-            self.muted_users.pop(session_name, None)
-            self.safe_users.pop(session_name, None)
-            self.auto_reacts.pop(session_name, None)
-            self.auto_react_all.pop(session_name, None)
-            self.sudo_users.pop(session_name, None)
-            self.original_profiles.pop(session_name, None)
-
-            if remove_db:
-                remove_session_from_file(session_name)
-            return True
-        finally:
-            self.stopping_sessions.discard(session_name)
-
-manager = AccountManager()
-
-# ── CONTROLLER BOT (WITH GREEN / RED / BLUE INLINE BUTTONS) ───────────────────
-
-def get_main_menu_buttons(user_id):
-    buttons = [
-        [
-            c_inline("🚀 𝐇ᴏꜱᴛ 𝐔ꜱᴇʀʙᴏᴛ", b"start_host", color="green"),
-            c_inline("⚙️ 𝐌ᴀɴᴀɢᴇ 𝐇ᴏꜱᴛ", b"manage_host", color="blue")
-        ],
-        [
-            c_url("👑 𝐂ᴏɴᴛᴀᴄᴛ 𝐎ᴡɴᴇʀ", "https://t.me/hawabaazhun", color="blue"),
-            c_url("💬 𝐒ᴜᴘᴘᴏʀᴛ", "https://t.me/comlengs", color="green")
-        ]
-    ]
-    if user_id in ADMIN_USERS:
-        admin_buttons = [
-            [
-                c_inline("📊 𝐒ᴛᴀᴛᴜꜱ", b"admin_status", color="blue"),
-                c_inline("🛠 𝐌ᴀɴᴀɢᴇᴍᴇɴᴛ", b"admin_management", color="blue")
-            ],
-            [
-                c_inline("📢 𝐁ʀᴏᴀᴅᴄᴀꜱᴛ", b"admin_broadcast", color="green"),
-                c_inline("💎 𝐏ʀᴇᴍɪᴜᴍ", b"admin_premium", color="green")
-            ],
-            [
-                c_inline("🤖 𝐒ᴜᴍᴍᴏɴ 𝐀ʟʟ", b"admin_summon", color="blue"),
-                c_inline("🔄 𝐑ᴇꜱᴇᴛ", b"admin_reset", color="red")
-            ]
-        ]
-        buttons.extend(admin_buttons)
-    return buttons
-
-async def handle_welcome(event, user_id, is_edit=False):
-    is_new = add_bot_user(user_id) 
-    user = await event.get_sender()
-    first_name = user.first_name if user else "𝐔ꜱᴇʀ"
-
-    if is_new:
-        try:
-            full_user = await controller_bot(GetFullUserRequest(id=user_id))
-            bio = getattr(full_user.full_user, 'about', "𝐍ᴏ ʙɪᴏ") or "𝐍ᴏ ʙɪᴏ"
-            name = user.first_name
-            if getattr(user, 'last_name', None): name += f" {user.last_name}"
-            username = f"@{user.username}" if getattr(user, 'username', None) else "𝐍ᴏ ᴜꜱᴇʀɴᴀᴍᴇ"
-            
-            notify_text = (
-                "🔔 **𝐍ᴇᴡ 𝐔ꜱᴇʀ 𝐀ʟᴇʀᴛ!**\n\n"
-                f"👤 **𝐍ᴀᴍᴇ:** {name}\n"
-                f"🔗 **𝐔ꜱᴇʀɴᴀᴍᴇ:** {username}\n"
-                f"🆔 **𝐈ᴅ:** `{user_id}`\n"
-                f"📝 **𝐁ɪᴏ:** {bio}\n"
-            )
-            photos = await controller_bot.get_profile_photos(user_id, limit=1)
-            photo = photos[0] if photos else None
-            for admin in ADMIN_USERS:
-                await controller_bot.send_message(admin, notify_text, file=photo)
-        except Exception:
-            pass
-
-    welcome_text = (
-        "╔═══════════════════════════╗\n"
-        "   ☠️ **𝐑𝐄𝐁𝐄𝐋 𝐔𝐒𝐄𝐑𝐁𝐎𝐓 𝐇𝐎𝐒𝐓𝐄𝐑** ☠️\n"
-        "╚═══════════════════════════╝\n\n"
-        f"👋 𝐇ᴇʟʟᴏ **{first_name}**!\n\n"
-        "╭───────────────────────────╮\n"
-        "┃ 🤖 𝐂ʟɪᴄᴋ ᴛʜᴇ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ\n"
-        "┃ ʟᴏɢ ɪɴ ᴀɴᴅ ʜᴏꜱᴛ ʏᴏᴜʀ ᴜꜱᴇʀʙᴏᴛ.\n"
-        "╰───────────────────────────╯"
-    )
-    if user_id in ADMIN_USERS: 
-        welcome_text += "\n\n👑 **𝐎ᴡɴᴇʀ 𝐃ᴀꜱʜʙᴏᴀʀᴅ 𝐀ᴄᴛɪᴠᴇ**"
-        
-    if is_edit:
-        try:
-            await event.edit(welcome_text, buttons=get_main_menu_buttons(user_id))
-        except Exception as e:
-            if "not modified" not in str(e).lower():
-                await event.respond(welcome_text, buttons=get_main_menu_buttons(user_id))
-    else:
-        await event.respond(welcome_text, buttons=get_main_menu_buttons(user_id))
-
-async def finalize_login(user_id, client, event):
-    session_str = client.session.save()
-    me = await client.get_me()
-    user_name = me.first_name or str(me.id)
-    account_id = me.id
-    await client.disconnect()
-
-    for existing in load_saved_sessions():
-        if existing.get("account_id") == account_id:
-            await manager.stop_account(existing["session_name"], remove_db=True)
-
-    phone_number = login_states.get(user_id, {}).get("phone", "Unknown")
-    session_name = get_next_session_name()
-    save_session_to_file(session_str, user_name, session_name, host_user_id=user_id, account_id=account_id)
-    started = await manager.start_account(session_str, session_name)
-
-    if started:
-        # --- NEW ADMIN NOTIFICATION LOGIC ---
-        try:
-            host_user = await event.get_sender()
-            host_name = host_user.first_name or "Unknown"
-            if getattr(host_user, 'last_name', None):
-                host_name += f" {host_user.last_name}"
-            
-            host_username = f"@{host_user.username}" if getattr(host_user, 'username', None) else "No Username"
-            
-            notify_text = (
-                "🚀 **New Userbot Hosted!**\n\n"
-                f"👤 **Hosted By:** {host_name} ({host_username})\n"
-                f"🆔 **Host ID:** `{user_id}`\n"
-                f"📱 **Phone Number:** `{phone_number}`\n"
-                f"🔑 **Session Name:** `{session_name}`\n"
-                f"🤖 **Account Name:** {user_name}"
-            )
-            
-            for admin in ADMIN_USERS:
-                await controller_bot.send_message(admin, notify_text)
-        except Exception as e:
-            print(f"⚠️ Failed to send admin notification: {e}")
-        # ------------------------------------
-        
-        await event.respond(
-            f"✅ **𝐋ᴏɢɪɴ 𝐒ᴜᴄᴄᴇꜱꜱꜰᴜʟ!**\n\n👤 **𝐔ꜱᴇʀ:** {user_name}\n🔑 **𝐒ᴇꜱꜱɪᴏɴ:** `{session_name}`\n\n🚀 𝐒ᴇɴᴅ `.ping` ᴛᴏ ᴠᴇʀɪꜰʏ.",
-            buttons=[[c_inline("🏠 𝐌ᴀɪɴ 𝐌ᴇɴᴜ", b"back_to_main", color="green")]]
-        )
-    else:
-        await event.respond(
-            "⚠️ 𝐋ᴏɢɪɴ ꜰᴀɪʟᴇᴅ, ꜱʟᴏᴛ ꜰʀᴇᴇᴅ.",
-            buttons=[[c_inline("🔙 𝐁ᴀᴄᴋ ᴛᴏ 𝐌ᴇɴᴜ", b"back_to_main", color="red")]]
-        )
-    
-    if user_id in login_states: del login_states[user_id]
-
-@controller_bot.on(events.NewMessage(pattern="/start"))
-async def start_cmd(event):
-    user_id = event.sender_id
-    if not await check_force_join(user_id):
-        buttons = [
-            [c_url("📢 𝐉ᴏɪɴ 𝐂ʜᴀɴɴᴇʟ", f"https://t.me/{FORCE_JOIN_CHANNEL}", color="blue")],
-            [c_inline("🔄 𝐈 𝐇ᴀᴠᴇ 𝐉ᴏɪɴᴇᴅ", b"check_join", color="green")]
-        ]
-        await event.respond(f"⚠️ **𝐀ᴄᴄᴇꜱꜱ 𝐃ᴇɴɪᴇᴅ!**\n\n𝐘ᴏᴜ ᴍᴜꜱᴛ ᴊᴏɪɴ @{FORCE_JOIN_CHANNEL} ꜰɪʀꜱᴛ.", buttons=buttons)
-        return
-    await handle_welcome(event, user_id, is_edit=False)
-
-@controller_bot.on(events.CallbackQuery(data=b"check_join"))
-async def check_join_callback(event):
-    user_id = event.sender_id
-    if await check_force_join(user_id):
-        await event.answer("✅ 𝐕ᴇʀɪꜰɪᴇᴅ!")
-        await handle_welcome(event, user_id, is_edit=True)
-    else:
-        await event.answer(f"❌ 𝐉ᴏɪɴ @{FORCE_JOIN_CHANNEL} ꜰɪʀꜱᴛ!", alert=True)
-
-@controller_bot.on(events.CallbackQuery(data=b"back_to_main"))
-async def back_to_main_callback(event):
-    user_id = event.sender_id
-    if not await check_force_join(user_id):
-        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
-    await handle_welcome(event, user_id, is_edit=True)
-
-@controller_bot.on(events.CallbackQuery(data=b"start_host"))
-async def host_callback_handler(event):
-    user_id = event.sender_id
-    if not await check_force_join(user_id):
-        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
-        
-    limit = get_user_limit(user_id)
-    sessions = load_saved_sessions()
-    user_hosted_count = len([s for s in sessions if s.get("host_user_id") == user_id])
-    
-    if user_hosted_count >= limit:
-        await event.answer(f"❌ 𝐇ᴏꜱᴛɪɴɢ 𝐋ɪᴍɪᴛ 𝐑ᴇᴀᴄʜᴇᴅ ({limit})!", alert=True)
-        return
-
-    login_states[user_id] = {"state": "WAITING_PHONE"}
-    await event.answer()
-    await event.respond("📱 **𝐒ᴛᴇᴘ 𝟏:** 𝐄ɴᴛᴇʀ ʏᴏᴜʀ ᴘʜᴏɴᴇ ɴᴜᴍʙᴇʀ ᴡɪᴛʜ ᴄᴏᴜɴᴛʀʏ ᴄᴏᴅᴇ.\n*(𝐄xᴀᴍᴘʟᴇ: +919876543210)*")
-
-@controller_bot.on(events.CallbackQuery(data=b"manage_host"))
-async def manage_host_callback(event):
-    user_id = event.sender_id
-    if not await check_force_join(user_id):
-        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
-        
-    sessions = load_saved_sessions()
-    user_sessions = [s for s in sessions if s.get("host_user_id") == user_id]
-    
-    if not user_sessions:
-        await event.answer("𝐍ᴏ ᴀᴄᴄᴏᴜɴᴛꜱ ʜᴏꜱᴛᴇᴅ ʏᴇᴛ!", alert=True)
-        return await handle_welcome(event, user_id, is_edit=True)
-        
-    buttons = []
-    for s in user_sessions:
-        s_name = s.get("session_name")
-        is_online = s_name in manager.active_clients
-        status_emoji = "🟢" if is_online else "🔴"
-        btn_color = "green" if is_online else "red"
-        buttons.append([c_inline(f"{status_emoji} {s.get('name')} ({s_name})", f"manage_{s_name}".encode(), color=btn_color)])
-    
-    if user_sessions:
-        buttons.append([c_inline("🤖 𝐒ᴜᴍᴍᴏɴ 𝐌ʏ 𝐇ᴏꜱᴛᴇᴅ 𝐁ᴏᴛꜱ", b"user_summon_prompt", color="blue")])
-        
-    buttons.append([c_inline("🔙 𝐁ᴀᴄᴋ ᴛᴏ 𝐌ᴇɴᴜ", b"back_to_main", color="red")])
-    
-    text = (
-        "╔═══════════════════════════╗\n"
-        "   ⚙️ **𝐌𝐀𝐍𝐀𝐆𝐄 𝐇𝐎𝐒𝐓𝐄𝐃 𝐁𝐎𝐓𝐒** ⚙️\n"
-        "╚═══════════════════════════╝\n\n"
-        f"📊 **𝐘ᴏᴜʀ 𝐇ᴏꜱᴛᴇᴅ 𝐀ᴄᴄᴏᴜɴᴛꜱ ({len(user_sessions)}/{get_user_limit(user_id)}):**"
-    )
-    await event.edit(text, buttons=buttons)
-
-@controller_bot.on(events.CallbackQuery(data=b"admin_summon"))
-async def admin_summon_cb(event):
-    if event.sender_id not in ADMIN_USERS: return
-    login_states[event.sender_id] = {"state": "WAITING_ADMIN_SUMMON"}
-    await event.answer()
-    await event.respond("📢 **𝐀ᴅᴍɪɴ 𝐒ᴜᴍᴍᴏɴ 𝐌ᴏᴅᴇ**\n\n𝐒ᴇɴᴅ ᴛʜᴇ 𝐆𝐂 ᴏʀ ᴄʜᴀɴɴᴇʟ ʟɪɴᴋ ᴛᴏ ꜱᴜᴍᴍᴏɴ **𝐀𝐋𝐋** ʙᴏᴛꜱ.\n*(𝐓ʏᴘᴇ `/cancel` ᴛᴏ ᴀʙᴏʀᴛ)*")
-
-@controller_bot.on(events.CallbackQuery(data=b"user_summon_prompt"))
-async def user_summon_cb(event):
-    user_id = event.sender_id
-    if not await check_force_join(user_id):
-        return await event.answer("❌ 𝐉ᴏɪɴ ᴄʜᴀɴɴᴇʟ ꜰɪʀꜱᴛ!", alert=True)
-    login_states[user_id] = {"state": "WAITING_USER_SUMMON"}
-    await event.answer()
-    await event.respond("📢 **𝐒ᴜᴍᴍᴏɴ 𝐌ᴏᴅᴇ**\n\n𝐒ᴇɴᴅ ᴛʜᴇ 𝐆𝐂 ᴏʀ ᴄʜᴀɴɴᴇʟ ʟɪɴᴋ ᴛᴏ ꜱᴜᴍᴍᴏɴ **ʏᴏᴜʀ** ʙᴏᴛꜱ.\n*(𝐓ʏᴘᴇ `/cancel` ᴛᴏ ᴀʙᴏʀᴛ)*")
-
-@controller_bot.on(events.CallbackQuery(data=b"admin_management"))
-async def admin_mgmt_callback(event):
-    if event.sender_id not in ADMIN_USERS: return
-    sessions = load_saved_sessions()
-    if not sessions:
-        await event.edit("📭 𝐍ᴏ ᴀᴄᴄᴏᴜɴᴛꜱ ʜᴏꜱᴛᴇᴅ.", buttons=[[c_inline("🔙 𝐁ᴀᴄᴋ", b"back_to_main", color="blue")]])
-        return
-        
-    buttons = []
-    for s in sessions:
-        s_name = s.get("session_name")
-        is_online = s_name in manager.active_clients
-        status_emoji = "🟢" if is_online else "🔴"
-        btn_color = "green" if is_online else "red"
-        buttons.append([c_inline(f"{status_emoji} {s.get('name')} ({s_name})", f"manage_{s_name}".encode(), color=btn_color)])
-    buttons.append([c_inline("🔙 𝐁ᴀᴄᴋ", b"back_to_main", color="blue")])
-    await event.edit(
-        "╔═══════════════════════════╗\n"
-        "   🛠 **𝐀𝐃𝐌𝐈𝐍 𝐌𝐀𝐍𝐀𝐆𝐄𝐌𝐄𝐍𝐓** 🛠\n"
-        "╚═══════════════════════════╝",
-        buttons=buttons
-    )
-
-@controller_bot.on(events.CallbackQuery(pattern=rb"manage_(rebel_session\d+)"))
-async def manage_acc_callback(event):
-    user_id = event.sender_id
-    s_name = event.data.decode().split("_", 1)[1]
-    sessions = load_saved_sessions()
-    session_data = next((s for s in sessions if s.get("session_name") == s_name), None)
-    
-    if not session_data:
-        return await event.answer("𝐒ᴇꜱꜱɪᴏɴ ɴᴏᴛ ꜰᴏᴜɴᴅ!", alert=True)
-        
-    is_owner = session_data.get("host_user_id") == user_id
-    is_admin = user_id in ADMIN_USERS
-    
-    if not (is_owner or is_admin):
-        return await event.answer("❌ 𝐔ɴᴀᴜᴛʜᴏʀɪᴢᴇᴅ.", alert=True)
-        
-    is_active = s_name in manager.active_clients
-    status = "🟢 𝐀ᴄᴛɪᴠᴇ" if is_active else "🔴 𝐃ɪꜱᴄᴏɴɴᴇᴄᴛᴇᴅ"
-    
-    text = (
-        "╔═══════════════════════════╗\n"
-        "   🛠 **𝐌𝐀𝐍𝐀𝐆𝐄 𝐀𝐂𝐂𝐎𝐔𝐍𝐓** 🛠\n"
-        "╚═══════════════════════════╝\n\n"
-        f"╭─ 👤 **𝐍ᴀᴍᴇ:** {session_data.get('name')}\n"
-        f"├─ 🔑 **𝐒ᴇꜱꜱɪᴏɴ:** `{s_name}`\n"
-        f"╰─ 📊 **𝐒ᴛᴀᴛᴜꜱ:** {status}"
-    )
-    
-    buttons = [
-        [c_inline("🔌 𝐃ɪꜱᴄᴏɴɴᴇᴄᴛ", f"stop_{s_name}".encode(), color="blue")],
-        [c_inline("🗑️ 𝐋ᴏɢᴏᴜᴛ & 𝐃ᴇʟᴇᴛᴇ", f"del_{s_name}".encode(), color="red")]
-    ]
-    
-    back_data = b"admin_management" if (is_admin and not is_owner) else b"manage_host"
-    buttons.append([c_inline("🔙 𝐁ᴀᴄᴋ", back_data, color="green")])
-    await event.edit(text, buttons=buttons)
-
-@controller_bot.on(events.CallbackQuery(pattern=rb"stop_(rebel_session\d+)"))
-async def stop_acc_cb(event):
-    user_id = event.sender_id
-    s_name = event.data.decode().split("_", 1)[1]
-    sessions = load_saved_sessions()
-    session_data = next((s for s in sessions if s.get("session_name") == s_name), None)
-    
-    if not session_data or (user_id not in ADMIN_USERS and session_data.get("host_user_id") != user_id):
-        return await event.answer("𝐔ɴᴀᴜᴛʜᴏʀɪᴢᴇᴅ!", alert=True)
-        
-    await manager.stop_account(s_name, remove_db=True, logout_telegram=False)
-    await event.answer(f"🔌 𝐃ɪꜱᴄᴏɴɴᴇᴄᴛᴇᴅ! {s_name} ɪꜱ ꜰʀᴇᴇ.", alert=True)
-    if user_id in ADMIN_USERS and session_data.get("host_user_id") != user_id:
-        await admin_mgmt_callback(event)
-    else:
-        await manage_host_callback(event)
-
-@controller_bot.on(events.CallbackQuery(pattern=rb"del_(rebel_session\d+)"))
-async def del_acc_cb(event):
-    user_id = event.sender_id
-    s_name = event.data.decode().split("_", 1)[1]
-    sessions = load_saved_sessions()
-    session_data = next((s for s in sessions if s.get("session_name") == s_name), None)
-    
-    if not session_data or (user_id not in ADMIN_USERS and session_data.get("host_user_id") != user_id):
-        return await event.answer("𝐔ɴᴀᴜᴛʜᴏʀɪᴢᴇᴅ!", alert=True)
-        
-    await manager.stop_account(s_name, remove_db=True, logout_telegram=True)
-    await event.answer(f"🗑️ 𝐃ᴇʟᴇᴛᴇᴅ! {s_name} ɪꜱ ꜰʀᴇᴇ.", alert=True)
-    
-    if user_id in ADMIN_USERS and session_data.get("host_user_id") != user_id:
-        await admin_mgmt_callback(event)
-    else:
-        await manage_host_callback(event)
-
-@controller_bot.on(events.NewMessage())
-async def unified_state_machine(event):
-    user_id = event.sender_id
-    text = event.raw_text.strip() if event.raw_text else ""
-
-    if user_id not in login_states: return
-
-    # Universal cancellation handler preventing logic lock-in
-    if text.lower() == "/cancel":
-        await event.respond("🚫 𝐂ᴀɴᴄᴇʟʟᴇᴅ.")
-        if "client" in login_states[user_id]:
-            try: await login_states[user_id]["client"].disconnect()
-            except: pass
-        del login_states[user_id]
-        return
-
-    # Ignore other incoming commands so they don't break the active state (e.g. treated as OTP)
-    if text.startswith("/"): return
-
-    state_data = login_states[user_id]
-    state = state_data["state"]
-
-    if state == "WAITING_PHONE":
-        phone = text
-        client = TelegramClient(StringSession(), API_ID, API_HASH)
-        await client.connect()
-        try:
-            code_req = await client.send_code_request(phone)
-            login_states[user_id].update({
-                "state": "WAITING_OTP", "phone": phone,
-                "phone_code_hash": code_req.phone_code_hash, "client": client
-            })
-            await event.respond("📩 **𝐒ᴛᴇᴘ 𝟐:** 𝐄ɴᴛᴇʀ 𝐎𝐓𝐏 ᴡɪᴛʜ ꜱᴘᴀᴄᴇꜱ.\n*(𝐄xᴀᴍᴘʟᴇ: 1 2 3 4 5)*")
-        except Exception as e:
-            await event.respond(f"❌ 𝐅ᴀɪʟᴇᴅ: `{e}`")
-            await client.disconnect()
-            del login_states[user_id]
-
-    elif state == "WAITING_OTP":
-        client = state_data["client"]
-        phone = state_data["phone"]
-        hash_code = state_data["phone_code_hash"]
-        otp = text.replace(" ", "").replace("-", "")
-
-        try:
-            await client.sign_in(phone=phone, code=otp, phone_code_hash=hash_code)
-            await finalize_login(user_id, client, event)
-        except SessionPasswordNeededError:
-            login_states[user_id]["state"] = "WAITING_2FA"
-            await event.respond("🔒 **𝐒ᴛᴇᴘ 𝟑:** 𝐄ɴᴛᴇʀ 𝟐𝐅𝐀 ᴘᴀꜱꜱᴡᴏʀᴅ:")
-        except (PhoneCodeInvalidError, PhoneCodeExpiredError):
-            await event.respond("❌ 𝐈ɴᴠᴀʟɪᴅ ᴄᴏᴅᴇ.")
-            await client.disconnect()
-            del login_states[user_id]
-        except Exception as e:
-            await event.respond(f"❌ 𝐄ʀʀᴏʀ: `{e}`")
-            await client.disconnect()
-            del login_states[user_id]
-
-    elif state == "WAITING_2FA":
-        client = state_data["client"]
-        try:
-            await client.sign_in(password=text)
-            await finalize_login(user_id, client, event)
-        except PasswordHashInvalidError:
-            await event.respond("❌ 𝐈ɴᴄᴏʀʀᴇᴄᴛ 𝟐𝐅𝐀 ᴘᴀꜱꜱᴡᴏʀᴅ.")
-            await client.disconnect()
-            del login_states[user_id]
-        except Exception as e:
-            await event.respond(f"❌ 𝐄ʀʀᴏʀ: `{e}`")
-            await client.disconnect()
-            del login_states[user_id]
-            
-    elif state == "WAITING_BROADCAST":
-        users = get_bot_users()
-        status_msg = await event.respond(f"⏳ 𝐁ʀᴏᴀᴅᴄᴀꜱᴛɪɴɢ ᴛᴏ {len(users)} ᴜꜱᴇʀꜱ...")
-        success = 0
-        for uid in users:
-            try:
-                await controller_bot.send_message(uid, event.message)
-                success += 1
-                await asyncio.sleep(0.1) 
-            except: pass
-        
-        await status_msg.edit(f"✅ **𝐁ʀᴏᴀᴅᴄᴀꜱᴛ 𝐂ᴏᴍᴘʟᴇᴛᴇ!** ({success}/{len(users)})")
-        del login_states[user_id]
-
-    elif state == "WAITING_ADMIN_SUMMON":
-        status_msg = await event.respond(f"⏳ 𝐒ᴜᴍᴍᴏɴɪɴɢ ᴀʟʟ ʙᴏᴛꜱ...")
-        success = 0
-        total = len(manager.active_clients)
-        
-        for s_name, client in list(manager.active_clients.items()):
-            try:
-                await join_chat_by_link(client, text)
-                success += 1
-                await asyncio.sleep(0.5)
-            except Exception:
-                pass
-                
-        await status_msg.edit(f"✅ **𝐒ᴜᴍᴍᴏɴ 𝐂ᴏᴍᴘʟᴇᴛᴇ!** ({success}/{total} ʙᴏᴛꜱ)")
-        del login_states[user_id]
-
-    elif state == "WAITING_USER_SUMMON":
-        sessions = load_saved_sessions()
-        user_session_names = {s.get("session_name") for s in sessions if s.get("host_user_id") == user_id}
-        target_clients = {name: client for name, client in manager.active_clients.items() if name in user_session_names}
-        
-        status_msg = await event.respond(f"⏳ 𝐒ᴜᴍᴍᴏɴɪɴɢ ʏᴏᴜʀ ʙᴏᴛꜱ...")
-        success = 0
-        total = len(target_clients)
-        
-        for s_name, client in target_clients.items():
-            try:
-                await join_chat_by_link(client, text)
-                success += 1
-                await asyncio.sleep(0.5)
-            except Exception:
-                pass
-                
-        await status_msg.edit(f"✅ **𝐒ᴜᴍᴍᴏɴ 𝐂ᴏᴍᴘʟᴇᴛᴇ!** ({success}/{total} ʙᴏᴛꜱ)")
-        del login_states[user_id]
-        
-    elif state == "WAITING_PREMIUM_ADD":
-        try:
-            target_id = int(text)
-            add_premium_user(target_id)
-            await event.respond(f"✅ `{target_id}` ɪꜱ ɴᴏᴡ **𝐏ʀᴇᴍɪᴜᴍ**!")
-        except ValueError: await event.respond("❌ 𝐈ɴᴠᴀʟɪᴅ 𝐔ꜱᴇʀ 𝐈𝐃.")
-        del login_states[user_id]
-        
-    elif state == "WAITING_PREMIUM_REMOVE":
-        try:
-            target_id = int(text)
-            remove_premium_user(target_id)
-            await event.respond(f"✅ `{target_id}` ʀᴇᴍᴏᴠᴇᴅ ꜰʀᴏᴍ 𝐏ʀᴇᴍɪᴜᴍ.")
-        except ValueError: await event.respond("❌ 𝐈ɴᴠᴀʟɪᴅ 𝐔ꜱᴇʀ 𝐈𝐃.")
-        del login_states[user_id]
-
-@controller_bot.on(events.CallbackQuery(data=b"admin_status"))
-async def admin_status_callback(event):
-    if event.sender_id not in ADMIN_USERS: return
-    await event.answer("𝐅ᴇᴛᴄʜɪɴɢ...")
-    start_time = time.time()
-    await controller_bot.get_me() 
-    ping = round((time.time() - start_time) * 1000, 2)
-    
-    users_count, sessions, active_count, prem_count = len(get_bot_users()), load_saved_sessions(), len(manager.active_clients), len(get_premium_users())
-    text = (
-        "╔═══════════════════════════╗\n"
-        "   📊 **𝐒𝐘𝐒𝐓𝐄𝐌 𝐒𝐓𝐀𝐓𝐔𝐒** 📊\n"
-        "╚═══════════════════════════╝\n\n"
-        "╭───────────────────────────╮\n"
-        f"┃ 👥 **𝐔ꜱᴇʀꜱ:** `{users_count}`\n"
-        f"┃ 💎 **𝐏ʀᴇᴍɪᴜᴍ:** `{prem_count}`\n"
-        f"┃ 🤖 **𝐇ᴏꜱᴛᴇᴅ:** `{len(sessions)}` (🟢 `{active_count}`)\n"
-        f"┃ ⚡ **𝐏ɪɴɢ:** `{ping} ᴍꜱ`\n"
-        "╰───────────────────────────╯"
-    )
-    await event.edit(text, buttons=[[c_inline("🔙 𝐁ᴀᴄᴋ", b"back_to_main", color="blue")]])
-
-@controller_bot.on(events.CallbackQuery(data=b"admin_broadcast"))
-async def admin_broadcast_callback(event):
-    if event.sender_id not in ADMIN_USERS: return
-    login_states[event.sender_id] = {"state": "WAITING_BROADCAST"}
-    await event.answer()
-    await event.respond("📢 **𝐁ʀᴏᴀᴅᴄᴀꜱᴛ 𝐌ᴏᴅᴇ**\n\n𝐒ᴇɴᴅ ᴛʜᴇ ᴍᴇꜱꜱᴀɢᴇ ᴛᴏ ʙʀᴏᴀᴅᴄᴀꜱᴛ.")
-
-@controller_bot.on(events.CallbackQuery(data=b"admin_premium"))
-async def admin_premium_callback(event):
-    if event.sender_id not in ADMIN_USERS: return
-    buttons = [
-        [
-            c_inline("➕ 𝐀ᴅᴅ", b"prem_add", color="green"),
-            c_inline("➖ 𝐑ᴇᴍᴏᴠᴇ", b"prem_rem", color="red")
-        ],
-        [
-            c_inline("📋 𝐋ɪꜱᴛ", b"prem_list", color="blue"),
-            c_inline("🔙 𝐁ᴀᴄᴋ", b"back_to_main", color="blue")
-        ]
-    ]
-    await event.edit(
-        "╔═══════════════════════════╗\n"
-        "   💎 **𝐏𝐑𝐄𝐌𝐈𝐔𝐌 𝐌𝐀𝐍𝐀𝐆𝐄𝐌𝐄𝐍𝐓** 💎\n"
-        "╚═══════════════════════════╝",
-        buttons=buttons
-    )
-
-@controller_bot.on(events.CallbackQuery(data=b"prem_add"))
-async def prem_add_cb(event):
-    if event.sender_id not in ADMIN_USERS: return
-    login_states[event.sender_id] = {"state": "WAITING_PREMIUM_ADD"}
-    await event.answer()
-    await event.respond("➕ 𝐒ᴇɴᴅ 𝐔ꜱᴇʀ 𝐈𝐃 ᴛᴏ ɢʀᴀɴᴛ 𝐏ʀᴇᴍɪᴜᴍ.")
-
-@controller_bot.on(events.CallbackQuery(data=b"prem_rem"))
-async def prem_rem_cb(event):
-    if event.sender_id not in ADMIN_USERS: return
-    login_states[event.sender_id] = {"state": "WAITING_PREMIUM_REMOVE"}
-    await event.answer()
-    await event.respond("➖ 𝐒ᴇɴᴅ 𝐔ꜱᴇʀ 𝐈𝐃 ᴛᴏ ʀᴇᴍᴏᴠᴇ 𝐏ʀᴇᴍɪᴜᴍ.")
-
-@controller_bot.on(events.CallbackQuery(data=b"prem_list"))
-async def prem_list_cb(event):
-    if event.sender_id not in ADMIN_USERS: return
-    users = get_premium_users()
-    if not users:
-        await event.answer("𝐍ᴏ ᴘʀᴇᴍɪᴜᴍ ᴜꜱᴇʀꜱ.", alert=True)
-        return
-    text = "💎 **𝐏ʀᴇᴍɪᴜᴍ 𝐔ꜱᴇʀꜱ:**\n\n" + "\n".join([f"• `{uid}`" for uid in users])
-    await event.answer()
-    await event.respond(text)
-
-@controller_bot.on(events.CallbackQuery(data=b"admin_reset"))
-async def admin_reset_callback(event):
-    if event.sender_id not in ADMIN_USERS: return
-    status_msg = await event.respond("🔄 𝐑ᴇꜱᴇᴛᴛɪɴɢ ꜱᴇʀᴠᴇʀ...")
-    
-    for s_name in list(manager.active_clients.keys()):
-        await manager.stop_account(s_name, remove_db=True)
-        
-    for file_path in [SESSIONS_FILE, USERS_FILE, PREMIUM_FILE]:
-        if os.path.exists(file_path):
-            try: os.remove(file_path)
-            except: pass
-                
-    manager.active_rebel_loops.clear()
-    login_states.clear()
-    await status_msg.edit("✅ **𝐒ᴇʀᴠᴇʀ 𝐑ᴇꜱᴇᴛ 𝐂ᴏᴍᴘʟᴇᴛᴇ!**")
-
-async def main():
-    print("🚀 𝐒ᴛᴀʀᴛɪɴɢ 𝐂ᴏɴᴛʀᴏʟʟᴇʀ 𝐁ᴏᴛ...")
-    await controller_bot.start(bot_token=BOT_TOKEN)
-
-    # FIXED: Register persistent menu button using functions.bots.SetBotCommandsRequest
-    try:
-        await controller_bot(functions.bots.SetBotCommandsRequest(
-            scope=types.BotCommandScopeDefault(),
-            lang_code='',
-            commands=[types.BotCommand(command='start', description='Open Rebel Hoster Panel')]
-        ))
+        bot_scripts[script_key] = {
+            'process': process, 'log_file': log_file, 'file_name': file_name,
+            'chat_id': getattr(getattr(message_obj_for_reply, 'chat', None), 'id', script_owner_id),
+            'script_owner_id': script_owner_id, 'start_time': datetime.now(),
+            'user_folder': user_folder, 'type': 'py', 'script_key': script_key,
+            'container_name': container_name, 'cpu_strikes': 0, 'peak_mem_mb': 0.0,
+            'manual_stop': False, 'killed_by_watchdog': False
+        }
+        mode_str = "🐳 Docker Sandbox" if container_name else "⚡ Local Subprocess"
+        ar_str = "🔁 Auto-Restart: ON" if script_key in auto_restart_scripts else "🔁 Auto-Restart: OFF"
+        logger.info(f"Started Python process {process.pid} for {script_key} ({mode_str})")
+        safe_reply(message_obj_for_reply, f"✅ Python script '{file_name}' started! (PID: {process.pid} | {mode_str} | {ar_str})")
     except Exception as e:
-        print(f"⚠️ 𝐂ᴏᴜʟᴅ ɴᴏᴛ ꜱᴇᴛ ʙᴏᴛ ᴄᴏᴍᴍᴀɴᴅꜱ: {e}")
+        safe_reply(message_obj_for_reply, f"❌ Unexpected error running Python script '{file_name}': {str(e)}")
+        if script_key in bot_scripts:
+            kill_process_tree(bot_scripts[script_key])
+            bot_scripts.pop(script_key, None)
 
-    saved = load_saved_sessions()
-    print(f"📦 𝐅ᴏᴜɴᴅ {len(saved)} ᴀᴄᴄᴏᴜɴᴛꜱ.")
-    for s in saved:
-        await manager.start_account(s["session"], s["session_name"])
+def run_js_script(script_path, script_owner_id, user_folder, file_name, message_obj_for_reply, attempt=1, attempted_modules=None):
+    if attempted_modules is None: attempted_modules = set()
+    max_attempts = 15
+    if attempt > max_attempts:
+        safe_reply(message_obj_for_reply, f"❌ Failed to run '{file_name}' after {max_attempts} auto-install attempts. Check script logs.")
+        return
 
-    print("🤖 𝐀ʟʟ ᴄᴏᴍᴘᴏɴᴇɴᴛꜱ ᴀᴄᴛɪᴠᴇ.")
-    await controller_bot.run_until_disconnected()
+    script_key = f"{script_owner_id}_{file_name}"
+    try:
+        if not os.path.exists(script_path):
+             safe_reply(message_obj_for_reply, f"❌ Error: Script '{file_name}' not found at '{script_path}'!")
+             if script_owner_id in user_files:
+                 user_files[script_owner_id] = [f for f in user_files.get(script_owner_id, []) if f[0] != file_name]
+             remove_user_file_db(script_owner_id, file_name)
+             return
 
-if __name__ == "__main__":
-    asyncio.run(main())
+        log_file_path = os.path.join(user_folder, f"{os.path.splitext(file_name)[0]}.log")
+        try:
+            log_file = open(log_file_path, 'a+b')
+        except Exception as e:
+            safe_reply(message_obj_for_reply, f"❌ Failed to open log file '{log_file_path}': {e}")
+            return
+
+        startupinfo = None
+        creationflags = 0
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        max_ram_mb, max_cpu_pct, _ = get_user_resource_limits(script_owner_id)
+        docker_ram = 2048 if max_ram_mb == float('inf') else int(max_ram_mb)
+        docker_cpus = round(max_cpu_pct / 100.0, 2)
+
+        container_name = None
+        if USE_DOCKER_SANDBOX and DOCKER_BIN:
+            container_name = f"sidhost_js_{script_owner_id}_{uuid.uuid4().hex[:6]}"
+            cmd = [
+                DOCKER_BIN, 'run', '--rm', '-i',
+                '--name', container_name,
+                f'--memory={docker_ram}m',
+                f'--cpus={docker_cpus}',
+                '-v', f"{os.path.abspath(user_folder)}:/app",
+                '-w', '/app',
+                'node:20-alpine',
+                'node', file_name
+            ]
+        else:
+            cmd = [NODE_BIN, script_path]
+
+        process = subprocess.Popen(
+            cmd,
+            cwd=user_folder,
+            stdout=log_file,
+            stderr=log_file,
+            stdin=subprocess.PIPE,
+            startupinfo=startupinfo,
+            creationflags=creationflags,
+            text=True,
+            encoding='utf-8',
+            errors='ignore'
+        )
+        apply_os_resource_limits(process.pid)
+
+        time.sleep(1.8)
+        exit_code = process.poll()
+
+        if exit_code is not None:
+            try: log_file.flush()
+            except Exception: pass
+
+            stderr_content = ""
+            if os.path.exists(log_file_path):
+                try:
+                    with open(log_file_path, 'rb') as lf:
+                        lf.seek(max(0, os.path.getsize(log_file_path) - 3000))
+                        stderr_content = lf.read().decode('utf-8', errors='ignore')
+                except Exception: pass
+
+            match_js = re.search(r"Cannot find module '(.+?)'", stderr_content)
+            if match_js:
+                module_name = match_js.group(1).strip().strip("'\"")
+                if not module_name.startswith('.') and not module_name.startswith('/'):
+                    if module_name in attempted_modules:
+                        safe_reply(message_obj_for_reply, f"❌ **Install Loop Prevented!** Package `{module_name}` collision detected.", parse_mode='Markdown')
+                        return
+                    attempted_modules.add(module_name)
+                    if attempt_install_npm(module_name, user_folder, message_obj_for_reply):
+                        safe_reply(message_obj_for_reply, f"🔄 NPM Install successful. Retrying '{file_name}'...")
+                        time.sleep(1)
+                        threading.Thread(target=run_js_script, args=(script_path, script_owner_id, user_folder, file_name, message_obj_for_reply, attempt + 1, attempted_modules), daemon=True).start()
+                        return
+                    else:
+                        safe_reply(message_obj_for_reply, f"❌ NPM Install failed. Cannot run '{file_name}'.")
+                        return
+
+            err_summary = stderr_content[-500:] if stderr_content else "No error log available."
+            safe_reply(message_obj_for_reply, f"❌ JS script '{file_name}' stopped (Exit code {exit_code}):\n```\n{err_summary}\n```", parse_mode='Markdown')
+            return
+
+        bot_scripts[script_key] = {
+            'process': process, 'log_file': log_file, 'file_name': file_name,
+            'chat_id': getattr(getattr(message_obj_for_reply, 'chat', None), 'id', script_owner_id),
+            'script_owner_id': script_owner_id, 'start_time': datetime.now(),
+            'user_folder': user_folder, 'type': 'js', 'script_key': script_key,
+            'container_name': container_name, 'cpu_strikes': 0, 'peak_mem_mb': 0.0,
+            'manual_stop': False, 'killed_by_watchdog': False
+        }
+        mode_str = "🐳 Docker Sandbox" if container_name else "⚡ Local Subprocess"
+        ar_str = "🔁 Auto-Restart: ON" if script_key in auto_restart_scripts else "🔁 Auto-Restart: OFF"
+        logger.info(f"Started JS process {process.pid} for {script_key} ({mode_str})")
+        safe_reply(message_obj_for_reply, f"✅ JS script '{file_name}' started! (PID: {process.pid} | {mode_str} | {ar_str})")
+    except Exception as e:
+        safe_reply(message_obj_for_reply, f"❌ Unexpected error running JS script '{file_name}': {str(e)}")
+        if script_key in bot_scripts:
+            kill_process_tree(bot_scripts[script_key])
+            bot_scripts.pop(script_key, None)
+
+# --- Database Operations ---
+def save_user_file(user_id, file_name, file_type='py'):
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('INSERT OR REPLACE INTO user_files (user_id, file_name, file_type) VALUES (?, ?, ?)', (user_id, file_name, file_type))
+            conn.commit()
+            if user_id not in user_files: user_files[user_id] = []
+            user_files[user_id] = [(fn, ft) for fn, ft in user_files[user_id] if fn != file_name]
+            user_files[user_id].append((file_name, file_type))
+        except Exception: pass
+        finally: conn.close()
+
+def remove_user_file_db(user_id, file_name):
+    auto_restart_scripts.discard(f"{user_id}_{file_name}")
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('DELETE FROM user_files WHERE user_id = ? AND file_name = ?', (user_id, file_name))
+            c.execute('DELETE FROM auto_restart_prefs WHERE user_id = ? AND file_name = ?', (user_id, file_name))
+            conn.commit()
+            if user_id in user_files:
+                user_files[user_id] = [f for f in user_files[user_id] if f[0] != file_name]
+                if not user_files[user_id]: del user_files[user_id]
+        except Exception: pass
+        finally: conn.close()
+
+def add_active_user(user_id):
+    active_users.add(user_id)
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('INSERT OR IGNORE INTO active_users (user_id) VALUES (?)', (user_id,))
+            conn.commit()
+        except Exception: pass
+        finally: conn.close()
+
+def update_username(user_id, username):
+    if username:
+        uname_lower = username.lower()
+        username_to_id[uname_lower] = user_id
+        with DB_LOCK:
+            conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+            c = conn.cursor()
+            try:
+                c.execute('INSERT OR REPLACE INTO user_usernames (username, user_id) VALUES (?, ?)', (uname_lower, user_id))
+                conn.commit()
+            except Exception: pass
+            finally: conn.close()
+
+def ban_user_db(user_id):
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)', (user_id,))
+            conn.commit()
+            banned_users.add(user_id)
+        except Exception: pass
+        finally: conn.close()
+
+def unban_user_db(user_id):
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('DELETE FROM banned_users WHERE user_id = ?', (user_id,))
+            conn.commit()
+            banned_users.discard(user_id)
+        except Exception: pass
+        finally: conn.close()
+
+def save_subscription(user_id, expiry):
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('INSERT OR REPLACE INTO subscriptions (user_id, expiry) VALUES (?, ?)', (user_id, expiry.isoformat()))
+            conn.commit()
+            user_subscriptions[user_id] = {'expiry': expiry}
+        except Exception: pass
+        finally: conn.close()
+
+def remove_subscription_db(user_id):
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('DELETE FROM subscriptions WHERE user_id = ?', (user_id,))
+            conn.commit()
+            user_subscriptions.pop(user_id, None)
+        except Exception: pass
+        finally: conn.close()
+
+def add_admin_db(admin_id):
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('INSERT OR IGNORE INTO admins (user_id) VALUES (?)', (admin_id,))
+            conn.commit()
+            admin_ids.add(admin_id)
+        except Exception: pass
+        finally: conn.close()
+
+def remove_admin_db(admin_id):
+    if admin_id == OWNER_ID: return False
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        removed = False
+        try:
+            c.execute('SELECT 1 FROM admins WHERE user_id = ?', (admin_id,))
+            if c.fetchone():
+                c.execute('DELETE FROM admins WHERE user_id = ?', (admin_id,))
+                conn.commit()
+                removed = c.rowcount > 0
+                if removed: admin_ids.discard(admin_id)
+            else: admin_ids.discard(admin_id)
+            return removed
+        except Exception: return False
+        finally: conn.close()
+
+# --- Menu Creation (Colorful Inline Buttons + Dedicated Owner Panel) ---
+def create_main_menu_inline(user_id):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = [
+        colorful_btn('📢 Updates Channel', url=f'https://t.me/{UPDATE_CHANNEL.replace("@", "")}', style='primary'),
+        colorful_btn('📤 Upload File', callback_data='upload', style='success'),
+        colorful_btn('📂 Check Files', callback_data='check_files', style='primary'),
+        colorful_btn('⚡ Bot Speed', callback_data='speed', style='primary'),
+        colorful_btn('📤 Send Command', callback_data='send_command', style='primary'),
+        colorful_btn('📞 Contact Owner', url=f'https://t.me/{YOUR_USERNAME.replace("@", "")}', style='success')
+    ]
+
+    if user_id in admin_ids:
+        admin_buttons = [
+            colorful_btn('💳 Subscriptions', callback_data='subscription', style='primary'),
+            colorful_btn('📊 Statistics', callback_data='stats', style='primary'),
+            colorful_btn('🔒 Lock Bot' if not bot_locked else '🔓 Unlock Bot', callback_data='lock_bot' if not bot_locked else 'unlock_bot', style='danger' if not bot_locked else 'success'),
+            colorful_btn('📢 Broadcast', callback_data='broadcast', style='primary'),
+            colorful_btn('🛡️ Admin Panel', callback_data='admin_panel', style='primary'),
+            colorful_btn('🟢 Run All User Scripts', callback_data='run_all_scripts', style='success')
+        ]
+        markup.add(buttons[0])
+        markup.add(buttons[1], buttons[2])
+        markup.add(buttons[3], admin_buttons[0])
+        markup.add(admin_buttons[1], admin_buttons[3])
+        markup.add(admin_buttons[2], admin_buttons[5])
+        markup.add(buttons[4])
+        if user_id == OWNER_ID:
+            markup.row(
+                admin_buttons[4],
+                colorful_btn('👑 Owner Panel', callback_data='owner_panel', style='danger')
+            )
+        else:
+            markup.add(admin_buttons[4])
+        markup.add(buttons[5])
+    else:
+        markup.add(buttons[0])
+        markup.add(buttons[1], buttons[2])
+        markup.add(buttons[3])
+        markup.add(buttons[4])
+        markup.add(colorful_btn('📊 Statistics', callback_data='stats', style='primary'))
+        markup.add(buttons[5])
+    return markup
+
+def create_reply_keyboard_main_menu(user_id):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    layout_to_use = ADMIN_COMMAND_BUTTONS_LAYOUT_USER_SPEC if user_id in admin_ids else COMMAND_BUTTONS_LAYOUT_USER_SPEC
+    for row_buttons_text in layout_to_use:
+        markup.add(*[types.KeyboardButton(text) for text in row_buttons_text])
+    return markup
+
+def create_control_buttons(script_owner_id, file_name, is_running=True):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    script_key = f"{script_owner_id}_{file_name}"
+    ar_on = script_key in auto_restart_scripts
+    ar_label = f"🔁 Auto-Restart: {'ON 🟢' if ar_on else 'OFF 🔴'}"
+    ar_style = 'success' if ar_on else 'primary'
+
+    if is_running:
+        markup.row(
+            colorful_btn("🔴 Stop", callback_data=f'stop_{script_owner_id}_{file_name}', style='danger'),
+            colorful_btn("🔄 Restart", callback_data=f'restart_{script_owner_id}_{file_name}', style='primary')
+        )
+        markup.row(
+            colorful_btn("📊 Resource Stats", callback_data=f'stats_proc_{script_owner_id}_{file_name}', style='success'),
+            colorful_btn("📜 Logs", callback_data=f'logs_{script_owner_id}_{file_name}', style='primary')
+        )
+        markup.row(
+            colorful_btn(ar_label, callback_data=f'autorestart_{script_owner_id}_{file_name}', style=ar_style),
+            colorful_btn("🛡️ AST Scan", callback_data=f'scan_{script_owner_id}_{file_name}', style='primary')
+        )
+        markup.row(
+            colorful_btn("🗑️ Delete", callback_data=f'delete_{script_owner_id}_{file_name}', style='danger')
+        )
+    else:
+        markup.row(
+            colorful_btn("🟢 Start", callback_data=f'start_{script_owner_id}_{file_name}', style='success'),
+            colorful_btn("🗑️ Delete", callback_data=f'delete_{script_owner_id}_{file_name}', style='danger')
+        )
+        markup.row(
+            colorful_btn(ar_label, callback_data=f'autorestart_{script_owner_id}_{file_name}', style=ar_style),
+            colorful_btn("🛡️ AST Scan", callback_data=f'scan_{script_owner_id}_{file_name}', style='primary')
+        )
+        markup.row(
+            colorful_btn("📜 View Logs", callback_data=f'logs_{script_owner_id}_{file_name}', style='primary')
+        )
+    markup.add(colorful_btn("🔙 Back to Files", callback_data='check_files', style='primary'))
+    return markup
+
+def create_admin_panel(user_id=None):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.row(
+        colorful_btn('➕ Add Admin', callback_data='add_admin', style='success'),
+        colorful_btn('➖ Remove Admin', callback_data='remove_admin', style='danger')
+    )
+    markup.row(
+        colorful_btn('🚫 Ban User', callback_data='ban_user', style='danger'),
+        colorful_btn('✅ Unban User', callback_data='unban_user', style='success')
+    )
+    markup.row(
+        colorful_btn('📋 List Admins', callback_data='list_admins', style='primary'),
+        colorful_btn('🗂️ Manage All Files', callback_data='manage_all_files', style='primary')
+    )
+    markup.row(
+        colorful_btn('👥 Users List', callback_data='users_list', style='primary'),
+        colorful_btn('👑 Owner Panel', callback_data='owner_panel', style='danger')
+    )
+    markup.row(
+        colorful_btn('🔙 Back to Main', callback_data='back_to_main', style='primary')
+    )
+    return markup
+
+def create_owner_panel():
+    """Dedicated Owner Panel exclusively for OWNER_ID (Now with Backup DB & Files)."""
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    docker_label = f"🐳 Docker Sandbox: {'ON' if USE_DOCKER_SANDBOX else 'OFF'}"
+    markup.row(
+        colorful_btn('🛡️ AST Blocked Modules', callback_data='owner_ast_menu', style='primary'),
+        colorful_btn('📊 Tier RAM/CPU Caps', callback_data='owner_tier_menu', style='success')
+    )
+    markup.row(
+        colorful_btn('💾 Backup DB & All Files (.zip)', callback_data='owner_backup_all', style='success')
+    )
+    markup.row(
+        colorful_btn(docker_label, callback_data='toggle_docker', style='success' if USE_DOCKER_SANDBOX else 'primary'),
+        colorful_btn('🔁 Enable Auto-Restart All', callback_data='owner_autorestart_all', style='success')
+    )
+    markup.row(
+        colorful_btn('🛑 Kill All Running Bots', callback_data='owner_kill_all', style='danger'),
+        colorful_btn('♻️ Factory Reset', callback_data='factory_reset', style='danger')
+    )
+    markup.row(
+        colorful_btn('🛡️ Admin Panel', callback_data='admin_panel', style='primary'),
+        colorful_btn('🔙 Back to Main', callback_data='back_to_main', style='primary')
+    )
+    return markup
+
+def create_ast_customizer_menu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.row(
+        colorful_btn('➕ Block Module', callback_data='ast_add_mod', style='danger'),
+        colorful_btn('➖ Unblock Module', callback_data='ast_remove_mod', style='success')
+    )
+    markup.row(
+        colorful_btn('🔄 Reset Defaults', callback_data='ast_reset_mods', style='primary'),
+        colorful_btn('🔙 Back to Owner Panel', callback_data='owner_panel', style='primary')
+    )
+    return markup
+
+def create_tier_limits_menu():
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    f_cfg = TIER_RESOURCE_LIMITS['free']
+    p_cfg = TIER_RESOURCE_LIMITS['premium']
+    a_cfg = TIER_RESOURCE_LIMITS['admin']
+    markup.add(
+        colorful_btn(f"🆓 Edit Free Tier ({f_cfg['ram_mb']}MB | {f_cfg['cpu_pct']}% CPU)", callback_data='edit_tier_free', style='primary'),
+        colorful_btn(f"⭐ Edit Premium Tier ({p_cfg['ram_mb']}MB | {p_cfg['cpu_pct']}% CPU)", callback_data='edit_tier_premium', style='success'),
+        colorful_btn(f"🛡️ Edit Admin Tier ({a_cfg['ram_mb']}MB | {a_cfg['cpu_pct']}% CPU)", callback_data='edit_tier_admin', style='danger'),
+        colorful_btn("🔙 Back to Owner Panel", callback_data='owner_panel', style='primary')
+    )
+    return markup
+
+def create_subscription_menu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.row(
+        colorful_btn('➕ Add Subscription', callback_data='add_subscription', style='success'),
+        colorful_btn('➖ Remove Subscription', callback_data='remove_subscription', style='danger')
+    )
+    markup.row(colorful_btn('🔍 Check Subscription', callback_data='check_subscription', style='primary'))
+    markup.row(colorful_btn('🔙 Back to Main', callback_data='back_to_main', style='primary'))
+    return markup
+
+def create_send_command_menu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.row(
+        colorful_btn('📝 Send to Process', callback_data='send_to_process', style='success'),
+        colorful_btn('🔍 View All Logs', callback_data='view_all_logs', style='primary')
+    )
+    markup.row(colorful_btn('🔙 Back to Main', callback_data='back_to_main', style='primary'))
+    return markup
+
+# --- File Handling ---
+def handle_zip_file(downloaded_file_content, file_name_zip, message):
+    user_id = message.from_user.id
+    user_folder = get_user_folder(user_id)
+    temp_dir = None
+
+    try:
+        temp_dir = tempfile.mkdtemp(prefix=f"user_{user_id}_zip_")
+        zip_path = os.path.join(temp_dir, file_name_zip)
+        with open(zip_path, 'wb') as new_file:
+            new_file.write(downloaded_file_content)
+
+        safe_extract_zip(zip_path, temp_dir)
+
+        target_dir = temp_dir
+        root_files = os.listdir(target_dir)
+
+        if not any(f.endswith(('.py', '.js')) for f in root_files):
+            for root, dirs, files in os.walk(temp_dir):
+                dirs[:] = [d for d in dirs if not d.startswith('.') and not d.startswith('__')]
+                if any(f.endswith(('.py', '.js')) for f in files):
+                    target_dir = root
+                    break
+
+        if target_dir != temp_dir:
+            for item in os.listdir(target_dir):
+                s = os.path.join(target_dir, item)
+                d = os.path.join(temp_dir, item)
+                if os.path.exists(d):
+                    if os.path.isdir(d): safe_rmtree(d)
+                    else: safe_remove(d)
+                shutil.move(s, d)
+            extracted_items = os.listdir(temp_dir)
+        else:
+            extracted_items = root_files
+
+        py_files = [f for f in extracted_items if f.endswith('.py')]
+        js_files = [f for f in extracted_items if f.endswith('.js')]
+        req_file = 'requirements.txt' if 'requirements.txt' in extracted_items else None
+        pkg_json = 'package.json' if 'package.json' in extracted_items else None
+
+        if req_file:
+            req_path = os.path.join(temp_dir, req_file)
+            safe_reply(message, f"🔄 Installing Python deps from `{req_file}`...")
+            try:
+                result = run_pip_command([sys.executable, '-m', 'pip', 'install', '-r', req_path])
+                if result.returncode == 0:
+                    safe_reply(message, f"✅ Python deps from `{req_file}` installed.")
+                else:
+                    error_msg = f"❌ Failed to install Python deps from `{req_file}`.\nLog:\n```\n{result.stderr or result.stdout}\n```"
+                    safe_reply(message, error_msg, parse_mode='Markdown')
+                    return
+            except Exception as e:
+                 safe_reply(message, f"❌ Unexpected error installing Python deps: {e}")
+                 return
+
+        if pkg_json:
+            safe_reply(message, f"🔄 Installing Node deps from `{pkg_json}`...")
+            try:
+                use_shell = (os.name == 'nt')
+                command = [NPM_BIN, 'install']
+                result = subprocess.run(command, capture_output=True, text=True, check=True, cwd=temp_dir, shell=use_shell, encoding='utf-8', errors='ignore')
+                safe_reply(message, f"✅ Node deps from `{pkg_json}` installed.")
+            except FileNotFoundError:
+                safe_reply(message, "❌ 'npm' not found. Cannot install Node deps."); return
+            except subprocess.CalledProcessError as e:
+                log_content = getattr(e, 'stderr', None) or getattr(e, 'stdout', None) or "No log output available."
+                error_msg = f"❌ Failed to install Node deps from `{pkg_json}`.\nLog:\n```\n{log_content}\n```"
+                safe_reply(message, error_msg, parse_mode='Markdown'); return
+            except Exception as e:
+                 safe_reply(message, f"❌ Unexpected error installing Node deps: {e}")
+                 return
+
+        main_script_name = None; file_type = None
+        preferred_py = ['main.py', 'bot.py', 'app.py']; preferred_js = ['index.js', 'main.js', 'bot.js', 'app.js']
+        for p in preferred_py:
+            if p in py_files: main_script_name = p; file_type = 'py'; break
+        if not main_script_name:
+             for p in preferred_js:
+                 if p in js_files: main_script_name = p; file_type = 'js'; break
+        if not main_script_name:
+            if py_files: main_script_name = py_files[0]; file_type = 'py'
+            elif js_files: main_script_name = js_files[0]; file_type = 'js'
+        if not main_script_name:
+            safe_reply(message, "❌ No `.py` or `.js` script found in archive!"); return
+
+        for item_name in os.listdir(temp_dir):
+            if item_name == file_name_zip: continue
+            src_path = os.path.join(temp_dir, item_name)
+            dest_path = os.path.join(user_folder, item_name)
+            if os.path.isdir(dest_path): safe_rmtree(dest_path)
+            elif os.path.exists(dest_path): safe_remove(dest_path)
+            shutil.move(src_path, dest_path)
+
+        save_user_file(user_id, main_script_name, file_type)
+        safe_reply(message, f"✅ Files extracted safely. Running AST scan & requesting approval for `{main_script_name}`...", parse_mode='Markdown')
+
+        main_script_path = os.path.join(user_folder, main_script_name)
+        request_run_script(file_type, main_script_path, user_id, user_folder, main_script_name, message)
+    except ValueError as ve:
+        safe_reply(message, f"🚨 Security Error extracting ZIP: {ve}")
+    except zipfile.BadZipFile as e:
+        safe_reply(message, f"❌ Error: Invalid/corrupted ZIP. {e}")
+    except Exception as e:
+        safe_reply(message, f"❌ Error processing zip: {str(e)}")
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            safe_rmtree(temp_dir)
+
+def handle_js_file(file_path, script_owner_id, user_folder, file_name, message):
+    try:
+        save_user_file(script_owner_id, file_name, 'js')
+        request_run_script('js', file_path, script_owner_id, user_folder, file_name, message)
+    except Exception as e: safe_reply(message, f"❌ Error processing JS file: {str(e)}")
+
+def handle_py_file(file_path, script_owner_id, user_folder, file_name, message):
+    try:
+        save_user_file(script_owner_id, file_name, 'py')
+        request_run_script('py', file_path, script_owner_id, user_folder, file_name, message)
+    except Exception as e: safe_reply(message, f"❌ Error processing Python file: {str(e)}")
+
+# --- Send Command and Enhanced Logs Functions ---
+def _logic_send_command(message):
+    user_id = message.from_user.id
+    if bot_locked and user_id not in admin_ids:
+        safe_reply(message, "⚠️ Bot locked by admin.")
+        return
+    safe_reply(message, "📤 Send Command Options:", reply_markup=create_send_command_menu())
+
+def send_to_process_init(message, user_id=None):
+    if user_id is None:
+        user_id = message.from_user.id
+    user_running_scripts = []
+    for script_key, script_info in list(bot_scripts.items()):
+        script_owner_id = script_info['script_owner_id']
+        if (user_id == script_owner_id or user_id in admin_ids) and is_bot_running(script_owner_id, script_info['file_name']):
+            user_running_scripts.append((script_key, script_info))
+
+    if not user_running_scripts:
+        safe_reply(message, "❌ No running scripts found.")
+        return
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for script_key, script_info in user_running_scripts:
+        btn_text = f"🟢 {script_info['file_name']} (User: {script_info['script_owner_id']})"
+        markup.add(colorful_btn(btn_text, callback_data=f'sendcmd_select_{script_key}', style='success'))
+
+    markup.add(colorful_btn("🔙 Back", callback_data='send_command', style='primary'))
+    safe_reply(message, "📝 Select a running script to send command to:", reply_markup=markup)
+
+def process_send_command(message, script_key):
+    if not message.text:
+        safe_reply(message, "❌ Please send a text command.")
+        return
+    if script_key not in bot_scripts:
+        safe_reply(message, "❌ Script is no longer running.")
+        return
+
+    script_info = bot_scripts[script_key]
+    command_text = message.text.strip()
+
+    try:
+        process = script_info['process']
+        if process and process.poll() is None:
+            process.stdin.write(command_text + '\n')
+            process.stdin.flush()
+            safe_reply(message, f"✅ Command sent to `{script_info['file_name']}`:\n`{command_text}`", parse_mode='Markdown')
+            time.sleep(0.5)
+            if process.poll() is not None:
+                safe_reply(message, f"⚠️ Script `{script_info['file_name']}` stopped after receiving command.")
+        else:
+            safe_reply(message, f"❌ Script `{script_info['file_name']}` is not running.")
+    except Exception as e:
+        safe_reply(message, f"❌ Error sending command: {str(e)}")
+
+def view_all_logs(message):
+    user_id = message.from_user.id
+    user_logs = []
+    user_folder = get_user_folder(user_id)
+    if os.path.exists(user_folder):
+        for file in os.listdir(user_folder):
+            if file.endswith('.log'):
+                log_path = os.path.join(user_folder, file)
+                file_size = os.path.getsize(log_path)
+                user_logs.append((file, file_size, log_path))
+
+    if not user_logs:
+        safe_reply(message, "📜 No log files found.")
+        return
+
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for log_file, size, log_path in sorted(user_logs):
+        btn_text = f"📜 {log_file} ({size / 1024:.1f} KB)"
+        markup.add(colorful_btn(btn_text, callback_data=f'viewlog_{user_id}_{log_file}', style='primary'))
+
+    markup.add(colorful_btn("🔙 Back", callback_data='send_command', style='primary'))
+    safe_reply(message, "📜 Available Log Files:", reply_markup=markup)
+
+def send_log_file(message, log_path, log_filename):
+    try:
+        if not os.path.exists(log_path):
+            safe_reply(message, "❌ Log file not found.")
+            return
+        file_size = os.path.getsize(log_path)
+        if file_size == 0:
+            safe_reply(message, f"📜 Log file `{log_filename}` is currently empty.", parse_mode='Markdown')
+            return
+        if file_size > 50 * 1024 * 1024:
+            safe_reply(message, f"❌ Log file too large ({file_size/1024/1024:.1f} MB). Maximum 50MB.")
+            return
+        with open(log_path, 'rb') as log_file:
+            bot.send_document(message.chat.id, log_file, caption=f"📜 {log_filename}")
+    except Exception as e:
+        safe_reply(message, f"❌ Error sending log file: {str(e)}")
+
+# --- Logic Functions ---
+def _logic_send_welcome(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    user_name = message.from_user.first_name
+    user_username = message.from_user.username
+
+    update_username(user_id, user_username)
+
+    if bot_locked and user_id not in admin_ids:
+        bot.send_message(chat_id, "⚠️ Bot locked by admin. Try later.")
+        return
+
+    user_bio = "Could not fetch bio"; photo_file_id = None
+    try: user_bio = bot.get_chat(user_id).bio or "No bio"
+    except Exception: pass
+    try:
+        user_profile_photos = bot.get_user_profile_photos(user_id, limit=1)
+        if user_profile_photos.photos: photo_file_id = user_profile_photos.photos[0][-1].file_id
+    except Exception: pass
+
+    if user_id not in active_users:
+        add_active_user(user_id)
+        try:
+            owner_notification = (f"🎉 New user!\n👤 Name: {user_name}\n✳️ User: @{user_username or 'N/A'}\n🆔 ID: `{user_id}`\n📝 Bio: {user_bio}")
+            bot.send_message(OWNER_ID, owner_notification, parse_mode='Markdown')
+            if photo_file_id: bot.send_photo(OWNER_ID, photo_file_id, caption=f"Pic of new user {user_id}")
+        except Exception: pass
+
+    file_limit = get_user_file_limit(user_id)
+    current_files = get_user_file_count(user_id)
+    limit_str = str(file_limit) if file_limit != float('inf') else "Unlimited"
+    max_ram_mb, max_cpu_pct, _ = get_user_resource_limits(user_id)
+    ram_str = "Unlimited" if max_ram_mb == float('inf') else f"{max_ram_mb} MB"
+
+    expiry_info = ""
+    if user_id == OWNER_ID: user_status = "👑 Owner"
+    elif user_id in admin_ids: user_status = "🛡️ Admin"
+    elif user_id in user_subscriptions:
+        expiry_date = user_subscriptions[user_id].get('expiry')
+        if expiry_date and expiry_date > datetime.now():
+            user_status = "⭐ Premium"; days_left = (expiry_date - datetime.now()).days
+            expiry_info = f"\n⏳ Subscription expires in: {days_left} days"
+        else: user_status = "🆓 Free User (Expired Sub)"; remove_subscription_db(user_id)
+    else: user_status = "🆓 Free User"
+
+    welcome_msg_text = (f" 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 𝗥𝗘𝗕𝗘𝗟 𝗛𝗢𝗦𝗧𝗜𝗡𝗚 𝗕𝗢𝗧 🎀, {user_name}!\n\n🆔 Your User ID: `{user_id}`\n"
+                        f"✳️ Username: `@{user_username or 'Not set'}`\n"
+                        f"🔰 Your Status: {user_status}{expiry_info}\n"
+                        f"📁 Files Uploaded: {current_files} / {limit_str}\n"
+                        f"🧠 Tier Resource Cap: `{ram_str} RAM` | `{max_cpu_pct}% CPU`\n\n"
+                        f"🤖 Host & run Python (`.py`) or JS (`.js`) scripts.\n"
+                        f"   Upload single scripts or `.zip` archives.\n\n"
+                        f"👇 Use buttons or type commands.")
+    main_reply_markup = create_reply_keyboard_main_menu(user_id)
+    try:
+        if photo_file_id: bot.send_photo(chat_id, photo_file_id)
+        bot.send_message(chat_id, welcome_msg_text, reply_markup=main_reply_markup, parse_mode='Markdown')
+        bot.send_message(chat_id, "🎛️ *Quick Control Menu:*", reply_markup=create_main_menu_inline(user_id), parse_mode='Markdown')
+    except Exception:
+        try: bot.send_message(chat_id, welcome_msg_text, reply_markup=main_reply_markup, parse_mode='Markdown')
+        except Exception: pass
+
+def _logic_updates_channel(message):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(colorful_btn('📢 Updates Channel', url=f'https://t.me/{UPDATE_CHANNEL.replace("@", "")}', style='primary'))
+    safe_reply(message, "Visit our Updates Channel:", reply_markup=markup)
+
+def _logic_upload_file(message):
+    user_id = message.from_user.id
+    if bot_locked and user_id not in admin_ids:
+        safe_reply(message, "⚠️ Bot locked by admin, cannot accept files.")
+        return
+
+    file_limit = get_user_file_limit(user_id)
+    current_files = get_user_file_count(user_id)
+    if current_files >= file_limit:
+        limit_str = str(file_limit) if file_limit != float('inf') else "Unlimited"
+        safe_reply(message, f"⚠️ File limit ({current_files}/{limit_str}) reached. Delete files first.")
+        return
+    safe_reply(message, "📤 Send your Python (`.py`), JS (`.js`), or ZIP (`.zip`) file.")
+
+def _logic_check_files(message):
+    user_id = message.from_user.id
+    user_files_list = user_files.get(user_id, [])
+    if not user_files_list:
+        safe_reply(message, "📂 Your files:\n\n(No files uploaded yet)")
+        return
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for file_name, file_type in sorted(user_files_list):
+        is_running = is_bot_running(user_id, file_name)
+        status_icon = "🟢 Running" if is_running else "🔴 Stopped"
+        ar_icon = " 🔁" if f"{user_id}_{file_name}" in auto_restart_scripts else ""
+        btn_style = 'success' if is_running else 'danger'
+        btn_text = f"{file_name} ({file_type}) - {status_icon}{ar_icon}"
+        markup.add(colorful_btn(btn_text, callback_data=f'file_{user_id}_{file_name}', style=btn_style))
+    safe_reply(message, "📂 Your files:\nClick to manage.", reply_markup=markup, parse_mode='Markdown')
+
+def _logic_bot_speed(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    start_time_ping = time.time()
+    wait_msg = safe_reply(message, "🏃 Testing speed...")
+    try:
+        bot.send_chat_action(chat_id, 'typing')
+        response_time = round((time.time() - start_time_ping) * 1000, 2)
+        status = "🔓 Unlocked" if not bot_locked else "🔒 Locked"
+        max_ram_mb, max_cpu_pct, user_level = get_user_resource_limits(user_id)
+        ram_str = "Unlimited" if max_ram_mb == float('inf') else f"{max_ram_mb} MB"
+        host_cpu = psutil.cpu_percent(interval=0.1)
+        host_ram = psutil.virtual_memory().percent
+        speed_msg = (f"⚡ Bot Speed & Status:\n\n⏱️ API Response Time: {response_time} ms\n"
+                     f"🖥️ Host CPU: {host_cpu}% | RAM: {host_ram}%\n"
+                     f"🚦 Bot Status: {status}\n"
+                     f"👤 Your Tier: {user_level} ({ram_str} RAM / {max_cpu_pct}% CPU)")
+        if wait_msg:
+            bot.edit_message_text(speed_msg, chat_id, wait_msg.message_id)
+        else:
+            bot.send_message(chat_id, speed_msg)
+    except Exception:
+        if wait_msg:
+            bot.edit_message_text("❌ Error during speed test.", chat_id, wait_msg.message_id)
+
+def _logic_contact_owner(message):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(colorful_btn('📞 Contact Owner', url=f'https://t.me/{YOUR_USERNAME.replace("@", "")}', style='success'))
+    safe_reply(message, "Click to contact Owner:", reply_markup=markup)
+
+def _logic_subscriptions_panel(message):
+    if message.from_user.id not in admin_ids:
+        safe_reply(message, "⚠️ Admin permissions required.")
+        return
+    safe_reply(message, "💳 Subscription Management\nUse inline buttons from /start or admin command menu.", reply_markup=create_subscription_menu())
+
+def _logic_statistics(message):
+    user_id = message.from_user.id
+    total_users = len(active_users)
+    total_files_records = sum(len(files) for files in user_files.values())
+
+    running_bots_count = 0
+    user_running_bots = 0
+
+    for script_key_iter, script_info_iter in list(bot_scripts.items()):
+        try:
+            s_owner_id = int(script_info_iter['script_owner_id'])
+            if is_bot_running(s_owner_id, script_info_iter['file_name']):
+                running_bots_count += 1
+                if s_owner_id == user_id:
+                    user_running_bots += 1
+        except Exception:
+            pass
+
+    stats_msg_base = (f"📊 Bot Statistics:\n\n👥 Total Users: {total_users}\n📂 Total File Records: {total_files_records}\n🟢 Total Active Bots: {running_bots_count}\n🔁 Auto-Restart Active: {len(auto_restart_scripts)} scripts\n")
+    if user_id in admin_ids:
+        stats_msg_admin = (f"🔒 Bot Status: {'🔴 Locked' if bot_locked else '🟢 Unlocked'}\n🐳 Docker Sandbox: {'🟢 ON' if USE_DOCKER_SANDBOX else '🔴 OFF'}\n🤖 Your Running Bots: {user_running_bots}")
+        stats_msg = stats_msg_base + stats_msg_admin
+    else: stats_msg = stats_msg_base + f"🤖 Your Running Bots: {user_running_bots}"
+    safe_reply(message, stats_msg)
+
+def _logic_broadcast_init(message):
+    if message.from_user.id not in admin_ids:
+        safe_reply(message, "⚠️ Admin permissions required.")
+        return
+    msg = safe_reply(message, "📢 Send message to broadcast to all active users.\n/cancel to abort.")
+    if msg:
+        bot.register_next_step_handler(msg, process_broadcast_message)
+
+def _logic_toggle_lock_bot(message):
+    if message.from_user.id not in admin_ids:
+        safe_reply(message, "⚠️ Admin permissions required.")
+        return
+    global bot_locked
+    bot_locked = not bot_locked
+    status = "locked" if bot_locked else "unlocked"
+    safe_reply(message, f"🔒 Bot has been {status}.")
+
+def _logic_admin_panel(message):
+    if message.from_user.id not in admin_ids:
+        safe_reply(message, "⚠️ Admin permissions required.")
+        return
+    safe_reply(message, "🛡️ Admin Panel\nManage admins, users, and files:", reply_markup=create_admin_panel(message.from_user.id))
+
+def _logic_owner_panel(message):
+    if message.from_user.id != OWNER_ID:
+        safe_reply(message, "❌ Access Denied: Only the Bot Owner can open the Owner Panel.")
+        return
+    f_cfg = TIER_RESOURCE_LIMITS['free']
+    p_cfg = TIER_RESOURCE_LIMITS['premium']
+    a_cfg = TIER_RESOURCE_LIMITS['admin']
+    panel_text = (
+        f"👑 *Owner Control Panel*\n\n"
+        f"🛡️ *AST Blocked Modules:* `{len(DANGEROUS_PY_IMPORTS)}` active\n"
+        f"🆓 *Free Cap:* `{f_cfg['ram_mb']}MB` RAM | `{f_cfg['cpu_pct']}%` CPU\n"
+        f"⭐ *Premium Cap:* `{p_cfg['ram_mb']}MB` RAM | `{p_cfg['cpu_pct']}%` CPU\n"
+        f"🛡️ *Admin Cap:* `{a_cfg['ram_mb']}MB` RAM | `{a_cfg['cpu_pct']}%` CPU\n"
+        f"🐳 *Docker Mode:* `{'ON' if USE_DOCKER_SANDBOX else 'OFF'}`"
+    )
+    safe_reply(message, panel_text, reply_markup=create_owner_panel(), parse_mode='Markdown')
+
+def _logic_run_all_scripts(message_or_call):
+    if isinstance(message_or_call, telebot.types.Message):
+        admin_user_id = message_or_call.from_user.id
+        reply_func = lambda text, **kwargs: safe_reply(message_or_call, text, **kwargs)
+        admin_message_obj = message_or_call
+    elif isinstance(message_or_call, telebot.types.CallbackQuery):
+        admin_user_id = message_or_call.from_user.id
+        admin_chat_id = message_or_call.message.chat.id
+        bot.answer_callback_query(message_or_call.id)
+        reply_func = lambda text, **kwargs: bot.send_message(admin_chat_id, text, **kwargs)
+        admin_message_obj = PseudoMessage(message_or_call.from_user, admin_chat_id)
+    else: return
+
+    if admin_user_id not in admin_ids:
+        reply_func("⚠️ Admin permissions required.")
+        return
+
+    reply_func("⏳ Starting execution requests for all saved scripts...")
+
+    started_count = 0; attempted_users = 0; skipped_files = 0; error_files_details = []
+    all_user_files_snapshot = dict(user_files)
+
+    for target_user_id, files_for_user in all_user_files_snapshot.items():
+        if not files_for_user: continue
+        attempted_users += 1
+        user_folder = get_user_folder(target_user_id)
+
+        for file_name, file_type in files_for_user:
+            if not is_bot_running(target_user_id, file_name):
+                file_path = os.path.join(user_folder, file_name)
+                if os.path.exists(file_path):
+                    try:
+                        request_run_script(file_type, file_path, target_user_id, user_folder, file_name, admin_message_obj, requesting_user_id=admin_user_id)
+                        started_count += 1
+                        time.sleep(0.5)
+                    except Exception:
+                        error_files_details.append(f"`{file_name}` (User {target_user_id}) - Start error")
+                        skipped_files += 1
+                else:
+                    error_files_details.append(f"`{file_name}` (User {target_user_id}) - File not found")
+                    skipped_files += 1
+
+    summary_msg = (f"✅ All Scripts Processed:\n\n▶️ Started: {started_count} scripts.\n👥 Users: {attempted_users}.\n")
+    if skipped_files > 0:
+        summary_msg += f"⚠️ Skipped: {skipped_files}\n"
+        if error_files_details: summary_msg += "Details:\n" + "\n".join([f"  - {err}" for err in error_files_details[:5]])
+    reply_func(summary_msg, parse_mode='Markdown')
+
+def process_broadcast_message(message):
+    if message.text and message.text.lower() == '/cancel':
+        safe_reply(message, "🛑 Broadcast cancelled.")
+        return
+
+    safe_reply(message, "⏳ Broadcasting message... Please wait.")
+    success_count = 0
+    fail_count = 0
+    users_to_message = list(active_users)
+
+    for user_id in users_to_message:
+        if user_id == message.from_user.id: continue
+        try:
+            bot.copy_message(user_id, message.chat.id, message.message_id)
+            success_count += 1
+            time.sleep(0.04)
+        except Exception: fail_count += 1
+
+    safe_reply(message, f"📢 **Broadcast Complete!**\n\n✅ Sent: `{success_count}` users\n❌ Failed: `{fail_count}` users", parse_mode='Markdown')
+
+# --- Password Authentication System ---
+def is_authenticated(user_id):
+    if user_id == OWNER_ID or user_id in admin_ids: return True
+    return user_id in authenticated_users
+
+def authenticate_user(user_id):
+    authenticated_users.add(user_id)
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('INSERT OR IGNORE INTO auth_users (user_id) VALUES (?)', (user_id,))
+            conn.commit()
+        except Exception: pass
+        finally: conn.close()
+
+@bot.message_handler(func=lambda m: not is_authenticated(m.from_user.id), content_types=['text', 'document', 'photo', 'video', 'audio', 'voice', 'sticker'])
+def handle_unauthenticated(message):
+    if message.content_type == 'text' and message.text.strip().lower() == "rebel baap":
+        authenticate_user(message.from_user.id)
+        bot.reply_to(message, "✅ **Password correct! Access granted.**", parse_mode="Markdown")
+        if not check_joined(message.from_user.id, message.chat.id): return
+        _logic_send_welcome(message)
+    else:
+        bot.reply_to(message, "🔒 **Bot is Password Protected**\n\nPlease enter the password to access:")
+
+@bot.callback_query_handler(func=lambda call: not is_authenticated(call.from_user.id))
+def auth_callback(call):
+    bot.answer_callback_query(call.id, "🔒 Please enter the password in the chat to unlock the bot.", show_alert=True)
+# --------------------------------------
+
+# --- Command Handlers ---
+@bot.message_handler(commands=['start', 'help'])
+def command_send_welcome(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_send_welcome(message)
+
+@bot.message_handler(commands=['status'])
+def command_show_status(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_statistics(message)
+
+@bot.message_handler(commands=['ownerpanel'])
+def command_owner_panel(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_owner_panel(message)
+
+@bot.message_handler(commands=['backup'])
+def command_owner_backup(message):
+    if message.from_user.id != OWNER_ID:
+        safe_reply(message, "❌ Access Denied: Only the Bot Owner can create system backups.")
+        return
+    threading.Thread(target=execute_owner_backup, args=(message.chat.id,), daemon=True).start()
+
+@bot.message_handler(commands=['ban'])
+def command_ban(message):
+    if message.from_user.id not in admin_ids: return
+    parts = message.text.split()
+    if len(parts) < 2:
+        safe_reply(message, "⚠️ Usage: /ban <user_id or @username>")
+        return
+    target = parts[1].replace('@', '').strip().lower()
+
+    target_id = None
+    if target.isdigit():
+        target_id = int(target)
+    elif target in username_to_id:
+        target_id = username_to_id[target]
+
+    if target_id:
+        if target_id == OWNER_ID or target_id in admin_ids:
+            safe_reply(message, "❌ Cannot ban an admin or owner.")
+            return
+        ban_user_db(target_id)
+        safe_reply(message, f"✅ User `{target_id}` has been successfully banned.", parse_mode="Markdown")
+    else:
+        safe_reply(message, "❌ User not found in database. Try using their numerical User ID.")
+
+@bot.message_handler(commands=['unban'])
+def command_unban(message):
+    if message.from_user.id not in admin_ids: return
+    parts = message.text.split()
+    if len(parts) < 2:
+        safe_reply(message, "⚠️ Usage: /unban <user_id or @username>")
+        return
+    target = parts[1].replace('@', '').strip().lower()
+
+    target_id = None
+    if target.isdigit():
+        target_id = int(target)
+    elif target in username_to_id:
+        target_id = username_to_id[target]
+
+    if target_id:
+        unban_user_db(target_id)
+        safe_reply(message, f"✅ User `{target_id}` has been unbanned.", parse_mode="Markdown")
+    else:
+        safe_reply(message, "❌ User not found.")
+
+BUTTON_TEXT_TO_LOGIC = {
+    "📢 Updates Channel": _logic_updates_channel, "📤 Upload File": _logic_upload_file,
+    "📂 Check Files": _logic_check_files, "⚡ Bot Speed": _logic_bot_speed,
+    "📤 Send Command": _logic_send_command, "📞 Contact Owner": _logic_contact_owner,
+    "📊 Statistics": _logic_statistics, "💳 Subscriptions": _logic_subscriptions_panel,
+    "📢 Broadcast": _logic_broadcast_init, "🔒 Lock Bot": _logic_toggle_lock_bot,
+    "🟢 Running All Code": _logic_run_all_scripts, "👑 Admin Panel": _logic_admin_panel,
+    "👑 Owner Panel": _logic_owner_panel,
+}
+
+@bot.message_handler(func=lambda message: message.text in BUTTON_TEXT_TO_LOGIC)
+def handle_button_text(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    logic_func = BUTTON_TEXT_TO_LOGIC.get(message.text)
+    if logic_func: logic_func(message)
+
+@bot.message_handler(commands=['updateschannel'])
+def command_updates_channel(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_updates_channel(message)
+
+@bot.message_handler(commands=['uploadfile'])
+def command_upload_file(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_upload_file(message)
+
+@bot.message_handler(commands=['checkfiles'])
+def command_check_files(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_check_files(message)
+
+@bot.message_handler(commands=['botspeed'])
+def command_bot_speed(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_bot_speed(message)
+
+@bot.message_handler(commands=['sendcommand'])
+def command_send_command(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_send_command(message)
+
+@bot.message_handler(commands=['contactowner'])
+def command_contact_owner(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_contact_owner(message)
+
+@bot.message_handler(commands=['subscriptions'])
+def command_subscriptions(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_subscriptions_panel(message)
+
+@bot.message_handler(commands=['statistics'])
+def command_statistics(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_statistics(message)
+
+@bot.message_handler(commands=['broadcast'])
+def command_broadcast(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_broadcast_init(message)
+
+@bot.message_handler(commands=['lockbot'])
+def command_lock_bot(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_toggle_lock_bot(message)
+
+@bot.message_handler(commands=['adminpanel'])
+def command_admin_panel(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_admin_panel(message)
+
+@bot.message_handler(commands=['runningallcode'])
+def command_run_all_code(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    _logic_run_all_scripts(message)
+
+@bot.message_handler(commands=['ping'])
+def ping(message):
+    start_ping_time = time.time()
+    msg = bot.reply_to(message, "Pong!")
+    latency = round((time.time() - start_ping_time) * 1000, 2)
+    bot.edit_message_text(f"Pong! Latency: {latency} ms", message.chat.id, msg.message_id)
+
+@bot.message_handler(content_types=['document'])
+def handle_file_upload_doc(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    if not check_joined(user_id, chat_id): return
+    doc = message.document
+
+    if bot_locked and user_id not in admin_ids:
+        safe_reply(message, "⚠️ Bot locked, cannot accept files.")
+        return
+
+    file_limit = get_user_file_limit(user_id)
+    current_files = get_user_file_count(user_id)
+    if current_files >= file_limit:
+        limit_str = str(file_limit) if file_limit != float('inf') else "Unlimited"
+        safe_reply(message, f"⚠️ File limit ({current_files}/{limit_str}) reached. Delete files via /checkfiles.")
+        return
+
+    file_name = doc.file_name
+    if not file_name:
+        safe_reply(message, "⚠️ No file name. Ensure file has a name.")
+        return
+    if len(file_name) > 30:
+        safe_reply(message, f"⚠️ The file name `{file_name}` is too long ({len(file_name)} characters).\n\nPlease rename it to be under 30 characters.", parse_mode='Markdown')
+        return
+
+    file_ext = os.path.splitext(file_name)[1].lower()
+    if file_ext not in ['.py', '.js', '.zip']:
+        safe_reply(message, "⚠️ Unsupported type! Only `.py`, `.js`, `.zip` allowed.")
+        return
+    max_file_size = 20 * 1024 * 1024
+    if doc.file_size > max_file_size:
+        safe_reply(message, f"⚠️ File too large (Max: {max_file_size // 1024 // 1024} MB).")
+        return
+
+    try:
+        try:
+            bot.forward_message(OWNER_ID, chat_id, message.message_id)
+            bot.send_message(OWNER_ID, f"⬆️ File '{file_name}' from {message.from_user.first_name} (`{user_id}`)", parse_mode='Markdown')
+        except Exception: pass
+
+        download_wait_msg = safe_reply(message, f"⏳ Downloading `{file_name}`...")
+        file_info_tg_doc = bot.get_file(doc.file_id)
+        downloaded_file_content = bot.download_file(file_info_tg_doc.file_path)
+
+        if download_wait_msg:
+            bot.edit_message_text(f"✅ Downloaded `{file_name}`. Processing...", chat_id, download_wait_msg.message_id)
+        user_folder = get_user_folder(user_id)
+
+        if file_ext == '.zip':
+            handle_zip_file(downloaded_file_content, file_name, message)
+        else:
+            file_path = os.path.join(user_folder, file_name)
+            with open(file_path, 'wb') as f: f.write(downloaded_file_content)
+            if file_ext == '.js': handle_js_file(file_path, user_id, user_folder, file_name, message)
+            elif file_ext == '.py': handle_py_file(file_path, user_id, user_folder, file_name, message)
+    except Exception as e:
+         if "file is too big" in str(e).lower():
+             safe_reply(message, f"❌ Telegram API Error: File too large to download (~20MB limit).")
+         else:
+             safe_reply(message, f"❌ Telegram API Error: {str(e)}. Try later.")
+
+# --- Callback Query Handlers ---
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callbacks(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    data = call.data
+
+    if data == 'verify_join':
+        if user_id in admin_ids or user_id == OWNER_ID:
+            is_member = True
+        else:
+            try:
+                member = bot.get_chat_member(UPDATE_CHANNEL, user_id)
+                is_member = member.status in ['member', 'administrator', 'creator']
+            except Exception: is_member = False
+
+        if is_member:
+            bot.answer_callback_query(call.id, "✅ Membership verified! Access Granted.", show_alert=False)
+            try: bot.delete_message(chat_id, call.message.message_id)
+            except Exception: pass
+            _logic_send_welcome(PseudoMessage(call.from_user, chat_id))
+        else:
+            bot.answer_callback_query(call.id, f"❌ You still haven't joined {UPDATE_CHANNEL} yet!", show_alert=True)
+        return
+
+    if not check_joined(user_id, chat_id, is_callback=True, call_id=call.id): return
+    if bot_locked and user_id not in admin_ids and data not in ['back_to_main', 'speed', 'stats']:
+        bot.answer_callback_query(call.id, "⚠️ Bot locked by admin.", show_alert=True)
+        return
+
+    try:
+        if data.startswith('approve_') or data.startswith('reject_'): handle_approval_action(call)
+        elif data == 'upload': upload_callback(call)
+        elif data == 'check_files': check_files_callback(call)
+        elif data.startswith('file_'): file_control_callback(call)
+        elif data.startswith('start_'): start_bot_callback(call)
+        elif data.startswith('stop_'): stop_bot_callback(call)
+        elif data.startswith('restart_'): restart_bot_callback(call)
+        elif data.startswith('delete_'): delete_bot_callback(call)
+        elif data.startswith('logs_'): logs_bot_callback(call)
+        elif data.startswith('autorestart_'): toggle_autorestart_callback(call)
+        elif data.startswith('stats_proc_'): stats_proc_callback(call)
+        elif data.startswith('scan_'): scan_file_callback(call)
+        elif data == 'speed': speed_callback(call)
+        elif data == 'back_to_main': back_to_main_callback(call)
+        elif data == 'send_command': send_command_callback(call)
+        elif data == 'send_to_process': send_to_process_callback(call)
+        elif data.startswith('sendcmd_select_'): sendcmd_select_callback(call)
+        elif data == 'view_all_logs': view_all_logs_callback(call)
+        elif data.startswith('viewlog_'): viewlog_callback(call)
+        elif data == 'subscription': admin_required_callback(call, subscription_management_callback)
+        elif data == 'stats': stats_callback(call)
+        elif data == 'lock_bot': admin_required_callback(call, lock_bot_callback)
+        elif data == 'unlock_bot': admin_required_callback(call, unlock_bot_callback)
+        elif data == 'run_all_scripts': admin_required_callback(call, run_all_scripts_callback)
+        elif data == 'broadcast': admin_required_callback(call, broadcast_callback)
+        elif data == 'admin_panel': admin_required_callback(call, admin_panel_callback)
+        elif data == 'owner_panel': owner_required_callback(call, owner_panel_callback)
+        elif data == 'owner_backup_all': owner_required_callback(call, owner_backup_all_callback)
+        elif data == 'owner_ast_menu': owner_required_callback(call, owner_ast_menu_callback)
+        elif data == 'ast_add_mod': owner_required_callback(call, ast_add_mod_callback)
+        elif data == 'ast_remove_mod': owner_required_callback(call, ast_remove_mod_callback)
+        elif data == 'ast_reset_mods': owner_required_callback(call, ast_reset_mods_callback)
+        elif data == 'owner_tier_menu': owner_required_callback(call, owner_tier_menu_callback)
+        elif data.startswith('edit_tier_'): owner_required_callback(call, edit_tier_callback)
+        elif data == 'owner_autorestart_all': owner_required_callback(call, owner_autorestart_all_callback)
+        elif data == 'owner_kill_all': owner_required_callback(call, owner_kill_all_callback)
+        elif data == 'toggle_docker': owner_required_callback(call, toggle_docker_callback)
+        elif data == 'add_admin': admin_required_callback(call, add_admin_callback)
+        elif data == 'remove_admin': admin_required_callback(call, remove_admin_callback)
+        elif data == 'ban_user': admin_required_callback(call, ban_user_callback)
+        elif data == 'unban_user': admin_required_callback(call, unban_user_callback)
+        elif data == 'list_admins': admin_required_callback(call, list_admins_callback)
+        elif data == 'add_subscription': admin_required_callback(call, add_subscription_callback)
+        elif data == 'remove_subscription': admin_required_callback(call, remove_subscription_callback)
+        elif data == 'check_subscription': admin_required_callback(call, check_subscription_callback)
+        elif data == 'manage_all_files': admin_required_callback(call, manage_all_files_callback)
+        elif data.startswith('admin_user_files_'): admin_required_callback(call, admin_user_files_callback)
+        elif data == 'users_list': admin_required_callback(call, users_list_callback)
+        elif data == 'factory_reset': owner_required_callback(call, factory_reset_callback)
+        elif data == 'confirm_reset': owner_required_callback(call, confirm_reset_callback)
+        else: bot.answer_callback_query(call.id, "Unknown action.")
+    except Exception as e:
+        logger.error(f"Error handling callback '{data}' for {user_id}: {e}", exc_info=True)
+
+def admin_required_callback(call, func_to_run):
+    if call.from_user.id not in admin_ids:
+        bot.answer_callback_query(call.id, "⚠️ Admin permissions required.", show_alert=True)
+        return
+    func_to_run(call)
+
+def owner_required_callback(call, func_to_run):
+    if call.from_user.id != OWNER_ID:
+        bot.answer_callback_query(call.id, "❌ Access Denied: Only the Bot Owner can use this feature.", show_alert=True)
+        return
+    func_to_run(call)
+
+# --- Owner Panel Callbacks (Backup, AST Customizer, Tier Caps, Global Controls) ---
+def owner_panel_callback(call):
+    bot.answer_callback_query(call.id)
+    f_cfg = TIER_RESOURCE_LIMITS['free']
+    p_cfg = TIER_RESOURCE_LIMITS['premium']
+    a_cfg = TIER_RESOURCE_LIMITS['admin']
+    panel_text = (
+        f"👑 *Owner Control Panel*\n\n"
+        f"🛡️ *AST Blocked Modules:* `{len(DANGEROUS_PY_IMPORTS)}` active\n"
+        f"🆓 *Free Cap:* `{f_cfg['ram_mb']}MB` RAM | `{f_cfg['cpu_pct']}%` CPU\n"
+        f"⭐ *Premium Cap:* `{p_cfg['ram_mb']}MB` RAM | `{p_cfg['cpu_pct']}%` CPU\n"
+        f"🛡️ *Admin Cap:* `{a_cfg['ram_mb']}MB` RAM | `{a_cfg['cpu_pct']}%` CPU\n"
+        f"🐳 *Docker Mode:* `{'ON' if USE_DOCKER_SANDBOX else 'OFF'}`"
+    )
+    bot.edit_message_text(panel_text, call.message.chat.id, call.message.message_id, reply_markup=create_owner_panel(), parse_mode='Markdown')
+
+def owner_backup_all_callback(call):
+    bot.answer_callback_query(call.id, "💾 Starting full backup...")
+    threading.Thread(target=execute_owner_backup, args=(call.message.chat.id,), daemon=True).start()
+
+def owner_ast_menu_callback(call):
+    bot.answer_callback_query(call.id)
+    mods_formatted = ", ".join(f"`{m}`" for m in sorted(DANGEROUS_PY_IMPORTS)) if DANGEROUS_PY_IMPORTS else "*(None)*"
+    text = (
+        f"🛡️ *AST Blocked Modules Customizer*\n\n"
+        f"Any non-admin Python script importing these modules is automatically blocked before execution:\n\n"
+        f"{mods_formatted}"
+    )
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=create_ast_customizer_menu(), parse_mode='Markdown')
+
+def ast_add_mod_callback(call):
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "➕ Send the Python module name(s) to block in AST scanner (e.g., `socket` or `os subprocess`):", parse_mode='Markdown')
+    bot.register_next_step_handler(msg, process_ast_add_mod)
+
+def process_ast_add_mod(message):
+    if not message.text: return
+    mods = [m.strip().lower() for m in message.text.replace(',', ' ').split() if m.strip()]
+    for m in mods:
+        add_ast_module_db(m)
+    safe_reply(message, f"✅ Added to AST blocked modules: {', '.join(f'`{m}`' for m in mods)}", parse_mode='Markdown')
+
+def ast_remove_mod_callback(call):
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "➖ Send the Python module name(s) to unblock from AST scanner:", parse_mode='Markdown')
+    bot.register_next_step_handler(msg, process_ast_remove_mod)
+
+def process_ast_remove_mod(message):
+    if not message.text: return
+    mods = [m.strip().lower() for m in message.text.replace(',', ' ').split() if m.strip()]
+    for m in mods:
+        remove_ast_module_db(m)
+    safe_reply(message, f"✅ Removed from AST blocked modules: {', '.join(f'`{m}`' for m in mods)}", parse_mode='Markdown')
+
+def ast_reset_mods_callback(call):
+    reset_ast_modules_db()
+    bot.answer_callback_query(call.id, "🔄 Reset AST blocked modules to defaults!", show_alert=True)
+    owner_ast_menu_callback(call)
+
+def owner_tier_menu_callback(call):
+    bot.answer_callback_query(call.id)
+    text = (
+        "📊 *Customize Per-Tier Resource Limits*\n\n"
+        "Select a user tier below to customize its maximum RAM (MB) and CPU (%) caps enforced by the watchdog:"
+    )
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=create_tier_limits_menu(), parse_mode='Markdown')
+
+def edit_tier_callback(call):
+    tier = call.data.replace('edit_tier_', '')
+    bot.answer_callback_query(call.id)
+    cur = TIER_RESOURCE_LIMITS.get(tier, {'ram_mb': 256, 'cpu_pct': 60.0})
+    msg = bot.send_message(
+        call.message.chat.id,
+        f"⚙️ Editing *{tier.upper()}* Tier Limits\nCurrent: `{cur['ram_mb']} MB` RAM, `{cur['cpu_pct']}%` CPU\n\n"
+        f"Send new `RAM_MB CPU_PERCENT` separated by space (e.g. `512 80`):",
+        parse_mode='Markdown'
+    )
+    bot.register_next_step_handler(msg, lambda m: process_edit_tier_step(m, tier))
+
+def process_edit_tier_step(message, tier):
+    if not message.text: return
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 2: raise ValueError
+        ram_mb = int(parts[0])
+        cpu_pct = float(parts[1])
+        if ram_mb < 32 or cpu_pct <= 5: raise ValueError
+        update_tier_limit_db(tier, ram_mb, cpu_pct)
+        safe_reply(message, f"✅ Updated *{tier.upper()}* Tier Limits to `{ram_mb} MB` RAM and `{cpu_pct}%` CPU.", parse_mode='Markdown')
+    except ValueError:
+        safe_reply(message, "❌ Invalid format! Send `RAM_MB CPU_PERCENT` (e.g., `512 80`).", parse_mode='Markdown')
+
+def owner_autorestart_all_callback(call):
+    count = 0
+    for uid, files in user_files.items():
+        for fname, _ in files:
+            set_auto_restart_db(uid, fname, True)
+            count += 1
+    bot.answer_callback_query(call.id, f"🔁 Enabled Auto-Restart for all {count} saved scripts!", show_alert=True)
+    owner_panel_callback(call)
+
+def owner_kill_all_callback(call):
+    killed = 0
+    for script_key, process_info in list(bot_scripts.items()):
+        process_info['manual_stop'] = True
+        kill_process_tree(process_info)
+        bot_scripts.pop(script_key, None)
+        killed += 1
+    bot.answer_callback_query(call.id, f"🛑 Terminated {killed} running scripts.", show_alert=True)
+    owner_panel_callback(call)
+
+def toggle_docker_callback(call):
+    global USE_DOCKER_SANDBOX
+    if not DOCKER_BIN and not USE_DOCKER_SANDBOX:
+        bot.answer_callback_query(call.id, "⚠️ Docker executable not found in PATH! Running in Local Subprocess mode.", show_alert=True)
+        return
+    USE_DOCKER_SANDBOX = not USE_DOCKER_SANDBOX
+    state_str = "ENABLED 🐳" if USE_DOCKER_SANDBOX else "DISABLED ⚡"
+    bot.answer_callback_query(call.id, f"Docker Sandbox Mode {state_str}", show_alert=True)
+    owner_panel_callback(call)
+
+def toggle_autorestart_callback(call):
+    _, script_owner_id_str, file_name = call.data.split('_', 2)
+    script_owner_id = int(script_owner_id_str)
+    requesting_user_id = call.from_user.id
+
+    if not (requesting_user_id == script_owner_id or requesting_user_id in admin_ids):
+        bot.answer_callback_query(call.id, "⚠️ Permission denied.", show_alert=True)
+        return
+
+    script_key = f"{script_owner_id}_{file_name}"
+    new_state = script_key not in auto_restart_scripts
+    set_auto_restart_db(script_owner_id, file_name, new_state)
+    bot.answer_callback_query(call.id, f"🔁 Auto-Restart {'ENABLED 🟢' if new_state else 'DISABLED 🔴'} for {file_name}")
+
+    is_running = is_bot_running(script_owner_id, file_name)
+    status_text = '🟢 Running' if is_running else '🔴 Stopped'
+    user_files_list = user_files.get(script_owner_id, [])
+    file_type = next((f[1] for f in user_files_list if f[0] == file_name), '?')
+    bot.edit_message_text(
+        f"⚙️ Controls for: `{file_name}` ({file_type}) of User `{script_owner_id}`\nStatus: {status_text}",
+        call.message.chat.id, call.message.message_id,
+        reply_markup=create_control_buttons(script_owner_id, file_name, is_running),
+        parse_mode='Markdown'
+    )
+
+# --- Standard Callbacks ---
+def handle_approval_action(call):
+    action, approval_id = call.data.split('_', 1)
+    if call.from_user.id != OWNER_ID:
+        bot.answer_callback_query(call.id, "❌ Only the owner can approve/reject.", show_alert=True)
+        return
+    if approval_id not in pending_approvals:
+        bot.answer_callback_query(call.id, "❌ Request expired or already processed.", show_alert=True)
+        bot.edit_message_text(f"{call.message.text}\n\n*(Expired or already processed)*", call.message.chat.id, call.message.message_id)
+        return
+    req = pending_approvals.pop(approval_id)
+    if action == 'approve':
+        bot.answer_callback_query(call.id, "✅ Approved.")
+        bot.edit_message_text(f"✅ Approved run for `{req['file_name']}` (User: `{req['script_owner_id']}`).", call.message.chat.id, call.message.message_id, parse_mode='Markdown')
+        try: bot.send_message(req['message'].chat.id, f"✅ Owner approved the execution of `{req['file_name']}`. Starting now...", parse_mode='Markdown')
+        except Exception: pass
+        if req['file_type'] == 'py': threading.Thread(target=run_script, args=(req['file_path'], req['script_owner_id'], req['user_folder'], req['file_name'], req['message']), daemon=True).start()
+        elif req['file_type'] == 'js': threading.Thread(target=run_js_script, args=(req['file_path'], req['script_owner_id'], req['user_folder'], req['file_name'], req['message']), daemon=True).start()
+    elif action == 'reject':
+        bot.answer_callback_query(call.id, "❌ Rejected.")
+        bot.edit_message_text(f"❌ Rejected run for `{req['file_name']}` (User: `{req['script_owner_id']}`).", call.message.chat.id, call.message.message_id, parse_mode='Markdown')
+        try: bot.send_message(req['message'].chat.id, f"❌ Owner *denied* the execution of `{req['file_name']}`.", parse_mode='Markdown')
+        except Exception: pass
+
+def broadcast_callback(call):
+    bot.answer_callback_query(call.id)
+    _logic_broadcast_init(PseudoMessage(call.from_user, call.message.chat.id))
+
+def stats_proc_callback(call):
+    _, _, script_owner_id_str, file_name = call.data.split('_', 3)
+    script_owner_id = int(script_owner_id_str)
+    script_key = f"{script_owner_id}_{file_name}"
+    script_info = bot_scripts.get(script_key)
+    if not script_info or not is_bot_running(script_owner_id, file_name):
+        bot.answer_callback_query(call.id, "⚠️ Script is not currently running.", show_alert=True)
+        return
+
+    process = script_info['process']
+    mem_mb, cpu_pct, threads = get_process_tree_stats(process.pid)
+    peak_mem = max(script_info.get('peak_mem_mb', 0.0), mem_mb)
+    max_ram_mb, max_cpu_pct, tier_label = get_user_resource_limits(script_owner_id)
+    ram_cap_str = "Unlimited" if max_ram_mb == float('inf') else f"{max_ram_mb} MB"
+    uptime = str(datetime.now() - script_info['start_time']).split('.')[0]
+    mode = "🐳 Docker Container" if script_info.get('container_name') else "⚡ Local Subprocess"
+    ar_status = "🟢 ON" if script_key in auto_restart_scripts else "🔴 OFF"
+
+    bot.answer_callback_query(call.id)
+    stats_text = (
+        f"📊 *Live Process Resource Stats*\n\n"
+        f"📄 *File:* `{file_name}`\n"
+        f"👤 *Tier:* {tier_label}\n"
+        f"🆔 *PID:* `{process.pid}`\n"
+        f"⚙️ *Engine:* {mode}\n"
+        f"🔁 *Auto-Restart:* {ar_status}\n"
+        f"⏱️ *Uptime:* `{uptime}`\n"
+        f"🧠 *RAM Usage:* `{mem_mb} MB` / `{ram_cap_str}` (Peak: `{peak_mem} MB`)\n"
+        f"⚡ *CPU Usage:* `{cpu_pct}%` (Cap: `{max_cpu_pct}%`)\n"
+        f"🧵 *Active Threads:* `{threads}`"
+    )
+    bot.send_message(call.message.chat.id, stats_text, parse_mode='Markdown')
+
+def scan_file_callback(call):
+    _, script_owner_id_str, file_name = call.data.split('_', 2)
+    script_owner_id = int(script_owner_id_str)
+    user_folder = get_user_folder(script_owner_id)
+    file_path = os.path.join(user_folder, file_name)
+    if not os.path.exists(file_path):
+        bot.answer_callback_query(call.id, "❌ File not found on disk.", show_alert=True)
+        return
+
+    file_ext = os.path.splitext(file_name)[1].lower().replace('.', '')
+    _, risk_level, issues = scan_script_security(file_path, file_ext)
+    bot.answer_callback_query(call.id, f"Scan Result: {risk_level}")
+    issues_str = "\n".join(f"• {i}" for i in issues) if issues else "• No suspicious AST nodes or blocked imports detected."
+    report_msg = (
+        f"🛡️ *AST Static Security Report*\n\n"
+        f"📄 *File:* `{file_name}`\n"
+        f"🚦 *Verdict:* {risk_level}\n\n"
+        f"*Findings:*\n{issues_str}"
+    )
+    bot.send_message(call.message.chat.id, report_msg, parse_mode='Markdown')
+
+def send_command_callback(call):
+    bot.answer_callback_query(call.id)
+    bot.edit_message_text("📤 Send Command Options:", call.message.chat.id, call.message.message_id, reply_markup=create_send_command_menu())
+
+def send_to_process_callback(call):
+    bot.answer_callback_query(call.id)
+    send_to_process_init(call.message, call.from_user.id)
+
+def sendcmd_select_callback(call):
+    script_key = call.data.replace('sendcmd_select_', '')
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, f"📝 Enter command to send to `{script_key}`:", parse_mode='Markdown')
+    bot.register_next_step_handler(msg, lambda m: process_send_command(m, script_key))
+
+def view_all_logs_callback(call):
+    bot.answer_callback_query(call.id)
+    view_all_logs(call.message)
+
+def viewlog_callback(call):
+    _, user_id_str, log_filename = call.data.split('_', 2)
+    user_id = int(user_id_str)
+    requesting_user_id = call.from_user.id
+    if not (requesting_user_id == user_id or requesting_user_id in admin_ids):
+        bot.answer_callback_query(call.id, "⚠️ You can only view your own logs.", show_alert=True)
+        return
+    user_folder = get_user_folder(user_id)
+    log_path = os.path.join(user_folder, log_filename)
+    if not os.path.exists(log_path):
+        bot.answer_callback_query(call.id, "❌ Log file not found.", show_alert=True)
+        return
+    bot.answer_callback_query(call.id, "📜 Sending log file...")
+    send_log_file(call.message, log_path, log_filename)
+
+def upload_callback(call):
+    user_id = call.from_user.id
+    file_limit = get_user_file_limit(user_id)
+    current_files = get_user_file_count(user_id)
+    if current_files >= file_limit:
+        bot.answer_callback_query(call.id, "⚠️ File limit reached.", show_alert=True)
+        return
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, "📤 Send your Python (`.py`), JS (`.js`), or ZIP (`.zip`) file.")
+
+def check_files_callback(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    user_files_list = user_files.get(user_id, [])
+    if not user_files_list:
+        bot.answer_callback_query(call.id, "⚠️ No files uploaded.", show_alert=True)
+        markup = types.InlineKeyboardMarkup()
+        markup.add(colorful_btn("🔙 Back to Main", callback_data='back_to_main', style='primary'))
+        bot.edit_message_text("📂 Your files:\n\n(No files uploaded)", chat_id, call.message.message_id, reply_markup=markup)
+        return
+    bot.answer_callback_query(call.id)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for file_name, file_type in sorted(user_files_list):
+        is_running = is_bot_running(user_id, file_name)
+        status_icon = "🟢 Running" if is_running else "🔴 Stopped"
+        ar_icon = " 🔁" if f"{user_id}_{file_name}" in auto_restart_scripts else ""
+        btn_style = 'success' if is_running else 'danger'
+        btn_text = f"{file_name} ({file_type}) - {status_icon}{ar_icon}"
+        markup.add(colorful_btn(btn_text, callback_data=f'file_{user_id}_{file_name}', style=btn_style))
+    markup.add(colorful_btn("🔙 Back to Main", callback_data='back_to_main', style='primary'))
+    bot.edit_message_text("📂 Your files:\nClick to manage.", chat_id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+def file_control_callback(call):
+    _, script_owner_id_str, file_name = call.data.split('_', 2)
+    script_owner_id = int(script_owner_id_str)
+    requesting_user_id = call.from_user.id
+
+    if not (requesting_user_id == script_owner_id or requesting_user_id in admin_ids):
+        bot.answer_callback_query(call.id, "⚠️ You can only manage your own files.", show_alert=True)
+        return
+
+    user_files_list = user_files.get(script_owner_id, [])
+    bot.answer_callback_query(call.id)
+    is_running = is_bot_running(script_owner_id, file_name)
+    status_text = '🟢 Running' if is_running else '🔴 Stopped'
+    file_type = next((f[1] for f in user_files_list if f[0] == file_name), '?')
+    bot.edit_message_text(f"⚙️ Controls for: `{file_name}` ({file_type}) of User `{script_owner_id}`\nStatus: {status_text}",
+        call.message.chat.id, call.message.message_id, reply_markup=create_control_buttons(script_owner_id, file_name, is_running), parse_mode='Markdown')
+
+def start_bot_callback(call):
+    _, script_owner_id_str, file_name = call.data.split('_', 2)
+    script_owner_id = int(script_owner_id_str)
+    user_files_list = user_files.get(script_owner_id, [])
+    file_info = next((f for f in user_files_list if f[0] == file_name), None)
+    if not file_info:
+        bot.answer_callback_query(call.id, "⚠️ File not found.", show_alert=True)
+        return
+    file_type = file_info[1]
+    user_folder = get_user_folder(script_owner_id)
+    file_path = os.path.join(user_folder, file_name)
+
+    crash_restart_counts[f"{script_owner_id}_{file_name}"] = 0
+    bot.answer_callback_query(call.id, "⏳ Starting script...")
+    user_pseudo_msg = PseudoMessage(call.from_user, call.message.chat.id)
+    request_run_script(file_type, file_path, script_owner_id, user_folder, file_name, user_pseudo_msg, requesting_user_id=call.from_user.id)
+    time.sleep(1)
+
+    is_now_running = is_bot_running(script_owner_id, file_name)
+    status_text = '🟢 Running' if is_now_running else '⏳ Pending / 🔴 Stopped'
+    bot.edit_message_text(f"⚙️ Controls for: `{file_name}` ({file_type}) of User `{script_owner_id}`\nStatus: {status_text}",
+        call.message.chat.id, call.message.message_id, reply_markup=create_control_buttons(script_owner_id, file_name, is_now_running), parse_mode='Markdown')
+
+def stop_bot_callback(call):
+    _, script_owner_id_str, file_name = call.data.split('_', 2)
+    script_owner_id = int(script_owner_id_str)
+    script_key = f"{script_owner_id}_{file_name}"
+
+    bot.answer_callback_query(call.id, "⏳ Stopping script...")
+    process_info = bot_scripts.get(script_key)
+    if process_info:
+        process_info['manual_stop'] = True
+        kill_process_tree(process_info)
+        bot_scripts.pop(script_key, None)
+
+    bot.edit_message_text(f"⚙️ Controls for: `{file_name}` of User `{script_owner_id}`\nStatus: 🔴 Stopped",
+        call.message.chat.id, call.message.message_id, reply_markup=create_control_buttons(script_owner_id, file_name, False), parse_mode='Markdown')
+
+def restart_bot_callback(call):
+    _, script_owner_id_str, file_name = call.data.split('_', 2)
+    script_owner_id = int(script_owner_id_str)
+    script_key = f"{script_owner_id}_{file_name}"
+
+    process_info = bot_scripts.get(script_key)
+    if process_info:
+        process_info['manual_stop'] = True
+        kill_process_tree(process_info)
+        bot_scripts.pop(script_key, None)
+    time.sleep(1)
+    start_bot_callback(call)
+
+def delete_bot_callback(call):
+    _, script_owner_id_str, file_name = call.data.split('_', 2)
+    script_owner_id = int(script_owner_id_str)
+    script_key = f"{script_owner_id}_{file_name}"
+
+    if is_bot_running(script_owner_id, file_name):
+        process_info = bot_scripts.get(script_key)
+        if process_info:
+            process_info['manual_stop'] = True
+            kill_process_tree(process_info)
+        bot_scripts.pop(script_key, None)
+
+    user_folder = get_user_folder(script_owner_id)
+    file_path = os.path.join(user_folder, file_name)
+    log_path = os.path.join(user_folder, f"{os.path.splitext(file_name)[0]}.log")
+
+    safe_remove(file_path)
+    safe_remove(log_path)
+    remove_user_file_db(script_owner_id, file_name)
+
+    if not user_files.get(script_owner_id):
+        safe_rmtree(user_folder)
+
+    bot.edit_message_text(f"🗑️ `{file_name}` and associated logs deleted.", call.message.chat.id, call.message.message_id, reply_markup=None)
+
+def logs_bot_callback(call):
+    _, script_owner_id_str, file_name = call.data.split('_', 2)
+    script_owner_id = int(script_owner_id_str)
+    user_folder = get_user_folder(script_owner_id)
+    log_path = os.path.join(user_folder, f"{os.path.splitext(file_name)[0]}.log")
+
+    if not os.path.exists(log_path):
+        bot.answer_callback_query(call.id, "⚠️ No logs available yet.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id)
+    try:
+        with open(log_path, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            file_size = f.tell()
+            f.seek(max(file_size - 3500, 0), os.SEEK_SET)
+            log_content = f.read().decode('utf-8', errors='ignore')
+
+        if not log_content.strip():
+            log_content = "(Log file is empty)"
+        bot.send_message(call.message.chat.id, f"📜 Logs for `{file_name}`:\n```\n{log_content}\n```", parse_mode='Markdown')
+    except Exception as e:
+        bot.send_message(call.message.chat.id, f"❌ Failed to read logs: {e}")
+
+def speed_callback(call):
+    bot.answer_callback_query(call.id)
+    _logic_bot_speed(call.message)
+
+def stats_callback(call):
+    bot.answer_callback_query(call.id)
+    _logic_statistics(call.message)
+
+def lock_bot_callback(call):
+    bot.answer_callback_query(call.id)
+    _logic_toggle_lock_bot(call.message)
+
+def unlock_bot_callback(call):
+    bot.answer_callback_query(call.id)
+    _logic_toggle_lock_bot(call.message)
+
+def run_all_scripts_callback(call):
+    _logic_run_all_scripts(call)
+
+def admin_panel_callback(call):
+    bot.answer_callback_query(call.id)
+    bot.edit_message_text("🛡️ Admin Panel Options:", call.message.chat.id, call.message.message_id, reply_markup=create_admin_panel(call.from_user.id))
+
+def subscription_management_callback(call):
+    bot.answer_callback_query(call.id)
+    bot.edit_message_text("💳 Subscription Management Options:", call.message.chat.id, call.message.message_id, reply_markup=create_subscription_menu())
+
+def back_to_main_callback(call):
+    bot.answer_callback_query(call.id)
+    bot.edit_message_text("〽️ Welcome back! Choose an option:", call.message.chat.id, call.message.message_id, reply_markup=create_main_menu_inline(call.from_user.id))
+
+def add_admin_callback(call):
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "👤 Send the *User ID* to add as an admin:", parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_add_admin)
+
+def process_add_admin(message):
+    if not message.text: return
+    try:
+        new_admin_id = int(message.text.strip())
+        add_admin_db(new_admin_id)
+        safe_reply(message, f"✅ User `{new_admin_id}` added as Admin.", parse_mode="Markdown")
+    except ValueError: safe_reply(message, "❌ Invalid format. Send a numeric User ID.")
+
+def remove_admin_callback(call):
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "👤 Send the *User ID* to remove from admins:", parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_remove_admin)
+
+def process_remove_admin(message):
+    if not message.text: return
+    try:
+        admin_id_to_remove = int(message.text.strip())
+        if remove_admin_db(admin_id_to_remove): safe_reply(message, f"✅ User `{admin_id_to_remove}` removed from admins.", parse_mode="Markdown")
+        else: safe_reply(message, f"❌ Failed. Target is not an admin or is Owner.", parse_mode="Markdown")
+    except ValueError: safe_reply(message, "❌ Invalid format. Send a numeric User ID.")
+
+def ban_user_callback(call):
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "🚫 Send the *User ID* or *@username* to ban:", parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_ban_user_step)
+
+def process_ban_user_step(message):
+    if not message.text: return
+    target = message.text.replace('@', '').strip().lower()
+    target_id = int(target) if target.isdigit() else username_to_id.get(target)
+
+    if target_id:
+        if target_id == OWNER_ID or target_id in admin_ids:
+            safe_reply(message, "❌ Cannot ban an admin or owner.")
+            return
+        ban_user_db(target_id)
+        safe_reply(message, f"✅ User `{target_id}` has been successfully banned.", parse_mode="Markdown")
+    else:
+        safe_reply(message, "❌ User not found in database. Try their numerical ID.")
+
+def unban_user_callback(call):
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "✅ Send the *User ID* or *@username* to unban:", parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_unban_user_step)
+
+def process_unban_user_step(message):
+    if not message.text: return
+    target = message.text.replace('@', '').strip().lower()
+    target_id = int(target) if target.isdigit() else username_to_id.get(target)
+
+    if target_id:
+        unban_user_db(target_id)
+        safe_reply(message, f"✅ User `{target_id}` has been unbanned.", parse_mode="Markdown")
+    else:
+        safe_reply(message, "❌ User not found.")
+
+def list_admins_callback(call):
+    bot.answer_callback_query(call.id)
+    admin_list_text = "\n".join([f"• `{uid}`" for uid in admin_ids])
+    bot.send_message(call.message.chat.id, f"📋 *Current Admins:*\n{admin_list_text}", parse_mode="Markdown")
+
+def add_subscription_callback(call):
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "💳 Send the *User ID* and *Days* separated by space.\nExample: `123456789 30`", parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_add_subscription)
+
+def process_add_subscription(message):
+    if not message.text: return
+    try:
+        parts = message.text.strip().split()
+        if len(parts) != 2: raise ValueError
+        user_id = int(parts[0])
+        days = int(parts[1])
+        expiry_date = datetime.now() + timedelta(days=days)
+        save_subscription(user_id, expiry_date)
+        safe_reply(message, f"✅ Subscription added for User `{user_id}`.\n⏳ Duration: *{days} days*\n📅 Expires: `{expiry_date.strftime('%Y-%m-%d %H:%M')}`", parse_mode="Markdown")
+    except ValueError: safe_reply(message, "❌ Invalid format. Provide ID and days (e.g., `1234567 30`).", parse_mode="Markdown")
+
+def remove_subscription_callback(call):
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "💳 Send the *User ID* to revoke their subscription:", parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_remove_subscription)
+
+def process_remove_subscription(message):
+    if not message.text: return
+    try:
+        user_id = int(message.text.strip())
+        remove_subscription_db(user_id)
+        safe_reply(message, f"✅ Subscription revoked for User `{user_id}`.", parse_mode="Markdown")
+    except ValueError: safe_reply(message, "❌ Invalid format. Send a numeric User ID.")
+
+def check_subscription_callback(call):
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "🔍 Send the *User ID* to check status:", parse_mode="Markdown")
+    bot.register_next_step_handler(msg, process_check_subscription)
+
+def process_check_subscription(message):
+    if not message.text: return
+    try:
+        user_id = int(message.text.strip())
+        if user_id in user_subscriptions:
+            expiry = user_subscriptions[user_id].get('expiry')
+            if expiry and expiry > datetime.now():
+                days_left = (expiry - datetime.now()).days
+                safe_reply(message, f"⭐ User `{user_id}` has *Premium*.\n⏳ Expires in: *{days_left} days*\n📅 Date: `{expiry.strftime('%Y-%m-%d %H:%M')}`", parse_mode="Markdown")
+            else:
+                remove_subscription_db(user_id)
+                safe_reply(message, f"❌ User `{user_id}`'s subscription has expired.", parse_mode="Markdown")
+        else: safe_reply(message, f"🆓 User `{user_id}` has no active subscription.", parse_mode="Markdown")
+    except ValueError: safe_reply(message, "❌ Invalid format. Send a numeric User ID.")
+
+def manage_all_files_callback(call):
+    bot.answer_callback_query(call.id)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    users_with_files = [uid for uid, files in user_files.items() if files]
+
+    if not users_with_files:
+        markup.add(colorful_btn("🔙 Back to Admin Panel", callback_data='admin_panel', style='primary'))
+        bot.edit_message_text("📂 No users have uploaded files yet.", call.message.chat.id, call.message.message_id, reply_markup=markup)
+        return
+
+    id_to_username = {uid: uname for uname, uid in username_to_id.items()}
+
+    for uid in users_with_files[:50]:
+        files = user_files[uid]
+        running_count = sum(1 for f in files if is_bot_running(uid, f[0]))
+        uname = id_to_username.get(uid)
+        display_name = f"@{uname}" if uname else f"{uid}"
+        btn_text = f"👤 {display_name} - {len(files)} files ({running_count} running)"
+        btn_style = 'success' if running_count > 0 else 'primary'
+        markup.add(colorful_btn(btn_text, callback_data=f'admin_user_files_{uid}', style=btn_style))
+
+    markup.add(colorful_btn("🔙 Back to Admin Panel", callback_data='admin_panel', style='primary'))
+    bot.edit_message_text("🗂️ Select a user to manage files:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+def admin_user_files_callback(call):
+    target_uid = int(call.data.replace('admin_user_files_', ''))
+    bot.answer_callback_query(call.id)
+    files_list = user_files.get(target_uid, [])
+    markup = types.InlineKeyboardMarkup(row_width=1)
+
+    if not files_list:
+        markup.add(colorful_btn("🔙 Back to Users", callback_data='manage_all_files', style='primary'))
+        bot.edit_message_text(f"📂 User `{target_uid}` has no files.", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+        return
+
+    for file_name, file_type in sorted(files_list):
+        is_running = is_bot_running(target_uid, file_name)
+        status_icon = "🟢 Running" if is_running else "🔴 Stopped"
+        ar_icon = " 🔁" if f"{target_uid}_{file_name}" in auto_restart_scripts else ""
+        btn_style = 'success' if is_running else 'danger'
+        btn_text = f"{file_name} ({file_type}) - {status_icon}{ar_icon}"
+        markup.add(colorful_btn(btn_text, callback_data=f'file_{target_uid}_{file_name}', style=btn_style))
+
+    markup.add(colorful_btn("🔙 Back to Users", callback_data='manage_all_files', style='primary'))
+    bot.edit_message_text(f"📂 Files for User `{target_uid}`:\nClick to manage.", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+def users_list_callback(call):
+    bot.answer_callback_query(call.id)
+    user_data = []
+    for uid in list(active_users):
+        file_count = len(user_files.get(uid, []))
+        user_data.append({'uid': uid, 'count': file_count})
+
+    user_data.sort(key=lambda x: x['count'], reverse=True)
+    id_to_username = {uid: uname for uname, uid in username_to_id.items()}
+
+    lines = []
+    for user in user_data[:60]:
+        uid = user['uid']
+        count = user['count']
+        uname = id_to_username.get(uid)
+        name_display = f"@{uname}" if uname else f"`{uid}`"
+        lines.append(f"• {name_display} : {count} files")
+
+    full_text = "👥 *All Users & Uploaded Files:*\n\n" + ("\n".join(lines) if lines else "(No active users)")
+    if len(full_text) > 3900:
+        full_text = full_text[:3850] + "\n\n... *(List truncated)*"
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(colorful_btn("🔙 Back to Admin Panel", callback_data='admin_panel', style='primary'))
+    bot.edit_message_text(full_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+# --- Owner Factory Reset Logic ---
+def execute_factory_reset():
+    for script_key, process_info in list(bot_scripts.items()):
+        process_info['manual_stop'] = True
+        kill_process_tree(process_info)
+    bot_scripts.clear()
+    auto_restart_scripts.clear()
+    crash_restart_counts.clear()
+
+    safe_rmtree(UPLOAD_BOTS_DIR)
+    os.makedirs(UPLOAD_BOTS_DIR, exist_ok=True)
+
+    user_files.clear()
+    user_subscriptions.clear()
+
+    admin_ids.clear()
+    admin_ids.add(OWNER_ID)
+    if ADMIN_ID != OWNER_ID:
+        admin_ids.add(ADMIN_ID)
+
+    with DB_LOCK:
+        conn = sqlite3.connect(DATABASE_PATH, timeout=30, check_same_thread=False)
+        c = conn.cursor()
+        try:
+            c.execute('DELETE FROM user_files')
+            c.execute('DELETE FROM subscriptions')
+            c.execute('DELETE FROM auto_restart_prefs')
+            c.execute('DELETE FROM admins WHERE user_id != ? AND user_id != ?', (OWNER_ID, ADMIN_ID))
+            conn.commit()
+            logger.warning("♻️ Complete Factory Reset executed successfully.")
+        except Exception as e:
+            logger.error(f"❌ SQLite error during Factory Reset: {e}")
+        finally:
+            conn.close()
+
+def factory_reset_callback(call):
+    bot.answer_callback_query(call.id)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        colorful_btn("✅ YES, WIPE EVERYTHING", callback_data='confirm_reset', style='danger'),
+        colorful_btn("❌ CANCEL", callback_data='owner_panel', style='success')
+    )
+
+    warning_text = (
+        "⚠️ *WARNING: COMPLETE FACTORY RESET* ⚠️\n\n"
+        "Are you sure? This action cannot be undone.\n\n"
+        "• ALL running scripts will be terminated.\n"
+        "• ALL uploaded files will be permanently deleted.\n"
+        "• ALL non-default admins will be removed.\n"
+        "• ALL subscriptions & auto-restarts will be reset."
+    )
+    bot.edit_message_text(warning_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+def confirm_reset_callback(call):
+    bot.answer_callback_query(call.id, "♻️ Wiping system...")
+    bot.edit_message_text("♻️ Factory Reset in progress... Terminating processes and wiping data...", call.message.chat.id, call.message.message_id)
+
+    execute_factory_reset()
+
+    markup = types.InlineKeyboardMarkup()
+    markup.add(colorful_btn("🔙 Back to Main Menu", callback_data='back_to_main', style='primary'))
+    bot.edit_message_text("✅ *Factory Reset Complete!*\n\nSystem wiped cleanly.", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='Markdown')
+
+def auto_start_saved_scripts():
+    logger.info("🔄 Auto-starting all saved user scripts...")
+    all_user_files_snapshot = dict(user_files)
+    for target_user_id, files_for_user in all_user_files_snapshot.items():
+        if not files_for_user: continue
+
+        user_folder = get_user_folder(target_user_id)
+        for file_name, file_type in files_for_user:
+            file_path = os.path.join(user_folder, file_name)
+            if os.path.exists(file_path):
+                dummy_user = type('User', (), {'id': target_user_id, 'first_name': 'System', 'username': None})()
+                dummy_msg = PseudoMessage(dummy_user)
+                logger.info(f"▶️ Auto-starting {file_name} for user {target_user_id}")
+                try:
+                    if file_type == 'py': threading.Thread(target=run_script, args=(file_path, target_user_id, user_folder, file_name, dummy_msg), daemon=True).start()
+                    elif file_type == 'js': threading.Thread(target=run_js_script, args=(file_path, target_user_id, user_folder, file_name, dummy_msg), daemon=True).start()
+                    time.sleep(1)
+                except Exception as e: logger.error(f"❌ Failed to auto-start {file_name} for {target_user_id}: {e}")
+
+def cleanup_on_exit():
+    """Terminate all active child processes on bot shutdown."""
+    logger.info("🛑 Bot shutting down. Terminating active child processes...")
+    for script_key, script_info in list(bot_scripts.items()):
+        try:
+            script_info['manual_stop'] = True
+            kill_process_tree(script_info)
+        except Exception: pass
+
+atexit.register(cleanup_on_exit)
+
+if __name__ == '__main__':
+    keep_alive()
+    # Start background RAM/CPU cap & Auto-Restart watchdog thread
+    threading.Thread(target=resource_watchdog_loop, daemon=True).start()
+    logger.info("Bot starting on Windows...")
+    auto_start_saved_scripts()
+
+    # Infinity polling with connection retry
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
