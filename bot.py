@@ -1,4 +1,4 @@
-# REBEL HOSTING BOT - (OWNER PANEL, BACKUP SYSTEM, TIER CAPS, AST CUSTOMIZER & AUTO-RESTART)
+# REBEL HOSTING BOT - (OWNER PANEL, BACKUP SYSTEM, TIER CAPS, AST CUSTOMIZER, AUTO-RESTART & 🖥️ SMALL TERMINAL)
 
 import telebot
 import subprocess
@@ -125,6 +125,7 @@ pending_approvals = {}
 script_security_reports = {}
 auto_restart_scripts = set()     # Stores script_keys ("{user_id}_{file_name}") with Auto-Restart ON
 crash_restart_counts = {}        # Tracks crash counts per script_key
+terminal_sessions = {}           # [TERMINAL] user_id -> True when terminal session is active
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -134,15 +135,17 @@ NODE_BIN = shutil.which('node') or shutil.which('node.exe') or 'node'
 NPM_BIN = shutil.which('npm') or shutil.which('npm.cmd') or ('npm.cmd' if os.name == 'nt' else 'npm')
 
 # --- Command Button Layouts ---
-COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
+COMMAND_BUTTONS_LAYOUT_USER_SPEC = [          # [TERMINAL] added
     ["📢 Updates Channel"],
     ["📤 Upload File", "📂 Check Files"],
+    ["🖥️ Terminal"],
     ["⚡ Bot Speed", "📊 Statistics"],
     ["📤 Send Command", "📞 Contact Owner"]
 ]
-ADMIN_COMMAND_BUTTONS_LAYOUT_USER_SPEC = [
+ADMIN_COMMAND_BUTTONS_LAYOUT_USER_SPEC = [    # [TERMINAL] added
     ["📢 Updates Channel"],
     ["📤 Upload File", "📂 Check Files"],
+    ["🖥️ Terminal"],
     ["⚡ Bot Speed", "📊 Statistics"],
     ["💳 Subscriptions", "📢 Broadcast"],
     ["🔒 Lock Bot", "🟢 Running All Code"],
@@ -1372,6 +1375,9 @@ def create_main_menu_inline(user_id):
         colorful_btn('📞 Contact Owner', url=f'https://t.me/{YOUR_USERNAME.replace("@", "")}', style='success')
     ]
 
+    # [TERMINAL] Add the terminal button in both branches
+    term_btn = colorful_btn('🖥️ Terminal', callback_data='term_open', style='success')
+
     if user_id in admin_ids:
         admin_buttons = [
             colorful_btn('💳 Subscriptions', callback_data='subscription', style='primary'),
@@ -1383,6 +1389,7 @@ def create_main_menu_inline(user_id):
         ]
         markup.add(buttons[0])
         markup.add(buttons[1], buttons[2])
+        markup.add(term_btn)                                    # [TERMINAL]
         markup.add(buttons[3], admin_buttons[0])
         markup.add(admin_buttons[1], admin_buttons[3])
         markup.add(admin_buttons[2], admin_buttons[5])
@@ -1398,6 +1405,7 @@ def create_main_menu_inline(user_id):
     else:
         markup.add(buttons[0])
         markup.add(buttons[1], buttons[2])
+        markup.add(term_btn)                                    # [TERMINAL]
         markup.add(buttons[3])
         markup.add(buttons[4])
         markup.add(colorful_btn('📊 Statistics', callback_data='stats', style='primary'))
@@ -2349,6 +2357,11 @@ def handle_callbacks(call):
         elif data == 'users_list': admin_required_callback(call, users_list_callback)
         elif data == 'factory_reset': owner_required_callback(call, factory_reset_callback)
         elif data == 'confirm_reset': owner_required_callback(call, confirm_reset_callback)
+        # [TERMINAL] — terminal callbacks
+        elif data == 'term_open':  term_open_callback(call)
+        elif data == 'term_close': term_close_callback(call)
+        elif data == 'term_help':  term_help_callback(call)
+        elif data == 'term_ls':    term_ls_callback(call)
         else: bot.answer_callback_query(call.id, "Unknown action.")
     except Exception as e:
         logger.error(f"Error handling callback '{data}' for {user_id}: {e}", exc_info=True)
@@ -2505,6 +2518,12 @@ def toggle_autorestart_callback(call):
     user_files_list = user_files.get(script_owner_id, [])
     file_type = next((f[1] for f in user_files_list if f[0] == file_name), '?')
     bot.edit_message_text(
+        f"⚙️ Controls for: `{file_name}` ({file_type}) of User `{script_owner_id}`\nStatus: {status_text}",
+        call.message.chat.id, call.message.message_id,
+        reply_markup=create_control_buttons(script_owner_id, file_name, is_running),
+        parse_mode='Markdown'
+    )
+        bot.edit_message_text(
         f"⚙️ Controls for: `{file_name}` ({file_type}) of User `{script_owner_id}`\nStatus: {status_text}",
         call.message.chat.id, call.message.message_id,
         reply_markup=create_control_buttons(script_owner_id, file_name, is_running),
@@ -3086,6 +3105,470 @@ def cleanup_on_exit():
         except Exception: pass
 
 atexit.register(cleanup_on_exit)
+
+# =========================================================================
+# 🖥️  SMALL TERMINAL  —  Manual / automatic package downloader for files
+# =========================================================================
+TERMINAL_WELCOME = (
+    "╔═══════════════════════════════╗\n"
+    "║  🖥️  *REBEL HOSTING TERMINAL*  ║\n"
+    "╚═══════════════════════════════╝\n\n"
+    "📌 *Type commands below as normal text messages.*\n"
+    "📌 _Type_ `help` _to see all commands._\n"
+    "📌 _Type_ `exit` _to close the terminal._"
+)
+
+TERMINAL_HELP = (
+    "🖥️ *TERMINAL — Available Commands*\n\n"
+    "🐍 *Python (pip):*\n"
+    "• `pip install <pkg>` — Install one or more packages\n"
+    "• `pip install -r requirements.txt` — Install from file\n"
+    "• `pip uninstall <pkg>` — Uninstall a package\n"
+    "• `pip list` — Show installed packages\n"
+    "• `pip freeze` — Show pip-format package list\n"
+    "• `pip show <pkg>` — Show info about a package\n\n"
+    "🟠 *Node.js (npm):*\n"
+    "• `npm install <pkg>` — Install a package\n"
+    "• `npm install` — Install all from package.json\n"
+    "• `npm list` — Show installed node packages\n\n"
+    "🪄 *Auto-download for files:*\n"
+    "• `deps <file.py>` — Auto-detect + install Python imports\n"
+    "• `deps <file.js>` — Auto-detect + install Node requires\n\n"
+    "📂 *Files:*\n"
+    "• `ls` — List your workspace files\n"
+    "• `cat <file>` — Show file content (max ~200 KB)\n\n"
+    "⚙️ *Other:*\n"
+    "• `help` — Show this help\n"
+    "• `exit` — Close terminal"
+)
+
+def _terminal_output_block(text):
+    text = (text or "").strip()
+    if not text:
+        text = "(no output)"
+    if len(text) > 3300:
+        text = text[:3200] + "\n... (truncated)"
+    return f"```\n{text}\n```"
+
+def _is_module_importable(modname):
+    try:
+        import importlib.util
+        return importlib.util.find_spec(modname) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+def create_terminal_inline_menu():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.row(
+        colorful_btn('❓ Help', callback_data='term_help', style='primary'),
+        colorful_btn('📋 List Files', callback_data='term_ls', style='success')
+    )
+    markup.row(colorful_btn('🔒 Close Terminal', callback_data='term_close', style='danger'))
+    return markup
+
+def open_terminal_for_user(chat_id, user_id):
+    terminal_sessions[user_id] = True
+    get_user_folder(user_id)
+    bot.send_message(chat_id, TERMINAL_WELCOME, parse_mode='Markdown',
+                     reply_markup=create_terminal_inline_menu())
+    bot.send_message(
+        chat_id,
+        f"👤 *User:* `{user_id}`\n📁 *Workspace:* `upload_bots/{user_id}/`",
+        parse_mode='Markdown'
+    )
+
+def _run_terminal_pip(message, cmd_args, user_id):
+    action = (cmd_args[0] if cmd_args else "").lower()
+    user_folder = get_user_folder(user_id)
+
+    if action == 'list':
+        try:
+            r = subprocess.run([sys.executable, '-m', 'pip', 'list', '--format=columns'],
+                               capture_output=True, text=True, timeout=60,
+                               encoding='utf-8', errors='ignore')
+            out = (r.stdout or r.stderr or "(no output)").strip()
+            safe_reply(message, f"📦 *Installed Python packages:*\n{_terminal_output_block(out)}", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ pip list error: `{e}`", parse_mode='Markdown')
+        return
+
+    if action == 'freeze':
+        try:
+            r = subprocess.run([sys.executable, '-m', 'pip', 'freeze'],
+                               capture_output=True, text=True, timeout=60,
+                               encoding='utf-8', errors='ignore')
+            out = (r.stdout or "(no output)").strip()
+            safe_reply(message, f"🧊 *pip freeze:*\n{_terminal_output_block(out)}", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ pip freeze error: `{e}`", parse_mode='Markdown')
+        return
+
+    if action == 'show':
+        if len(cmd_args) < 2:
+            safe_reply(message, "❌ Usage: `pip show <package>`", parse_mode='Markdown')
+            return
+        try:
+            r = subprocess.run([sys.executable, '-m', 'pip', 'show', cmd_args[1]],
+                               capture_output=True, text=True, timeout=60,
+                               encoding='utf-8', errors='ignore')
+            out = (r.stdout or r.stderr or "(no output)").strip()
+            safe_reply(message, f"ℹ️ *pip show {cmd_args[1]}:*\n{_terminal_output_block(out)}", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ pip show error: `{e}`", parse_mode='Markdown')
+        return
+
+    if action in ('install', 'uninstall'):
+        if len(cmd_args) > 20:
+            safe_reply(message, "❌ Too many arguments.", parse_mode='Markdown')
+            return
+        for arg in cmd_args:
+            if arg.lower().startswith(('--target', '--prefix', '--root', '--root-user-action')):
+                safe_reply(message, f"❌ Flag `{arg}` not allowed in terminal.", parse_mode='Markdown')
+                return
+
+        safe_reply(message, f"⏳ Running `pip {' '.join(cmd_args)}`...\n_This can take 1–2 minutes._", parse_mode='Markdown')
+        cmd = [sys.executable, '-m', 'pip'] + cmd_args
+        try:
+            run_cwd = user_folder if any(a in ('-r', '--requirement') for a in cmd_args) else None
+            if run_cwd:
+                r = subprocess.run(cmd, cwd=run_cwd, capture_output=True, text=True,
+                                   check=False, encoding='utf-8', errors='ignore')
+                if r.returncode != 0 and 'externally-managed-environment' in (r.stderr or ''):
+                    if '--break-system-packages' not in cmd:
+                        cmd.append('--break-system-packages')
+                    r = subprocess.run(cmd, cwd=run_cwd, capture_output=True, text=True,
+                                       check=False, encoding='utf-8', errors='ignore')
+            else:
+                r = run_pip_command(cmd)
+            out = ((r.stdout or '') + '\n' + (r.stderr or '')).strip()
+            icon = "✅" if r.returncode == 0 else "❌"
+            safe_reply(message, f"{icon} *pip {action}* (exit `{r.returncode}`):\n{_terminal_output_block(out)}", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ Error running pip: `{e}`", parse_mode='Markdown')
+        return
+
+    safe_reply(message, "❌ Unknown pip action. Allowed: `install`, `uninstall`, `list`, `freeze`, `show`.", parse_mode='Markdown')
+
+
+def _run_terminal_npm(message, cmd_args, user_id):
+    if not cmd_args:
+        safe_reply(message, "❌ Usage: `npm install <package>` or `npm install`", parse_mode='Markdown')
+        return
+    action = cmd_args[0].lower()
+    user_folder = get_user_folder(user_id)
+    use_shell = (os.name == 'nt')
+
+    if action in ('install', 'i'):
+        if len(cmd_args) > 10:
+            safe_reply(message, "❌ Too many arguments.", parse_mode='Markdown')
+            return
+        desc = ' '.join(cmd_args[1:]) if len(cmd_args) > 1 else '(from package.json)'
+        safe_reply(message, f"⏳ Running `npm {action} {desc}` in your workspace...", parse_mode='Markdown')
+        try:
+            r = subprocess.run([NPM_BIN] + cmd_args, capture_output=True, text=True,
+                               check=False, cwd=user_folder, shell=use_shell,
+                               timeout=300, encoding='utf-8', errors='ignore')
+            out = ((r.stdout or '') + '\n' + (r.stderr or '')).strip()
+            icon = "✅" if r.returncode == 0 else "❌"
+            safe_reply(message, f"{icon} *npm {action}* (exit `{r.returncode}`):\n{_terminal_output_block(out)}", parse_mode='Markdown')
+        except FileNotFoundError:
+            safe_reply(message, "❌ npm not found in PATH.", parse_mode='Markdown')
+        except subprocess.TimeoutExpired:
+            safe_reply(message, "⏱️ npm command timed out (5 min).", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ npm error: `{e}`", parse_mode='Markdown')
+        return
+
+    if action in ('list', 'ls'):
+        try:
+            r = subprocess.run([NPM_BIN, 'list', '--depth=0'], capture_output=True, text=True,
+                               check=False, cwd=user_folder, shell=use_shell,
+                               timeout=60, encoding='utf-8', errors='ignore')
+            out = ((r.stdout or '') + (r.stderr or '')).strip() or "(no output)"
+            safe_reply(message, f"📦 *npm packages:*\n{_terminal_output_block(out)}", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ npm list error: `{e}`", parse_mode='Markdown')
+        return
+
+    safe_reply(message, "❌ Unknown npm action. Allowed: `install`, `list`.", parse_mode='Markdown')
+
+
+def _run_terminal_deps(message, fname, user_id):
+    if not fname or '..' in fname or '/' in fname or '\\' in fname:
+        safe_reply(message, "❌ Invalid filename.", parse_mode='Markdown')
+        return
+    user_folder = get_user_folder(user_id)
+    fpath = os.path.join(user_folder, fname)
+    if not os.path.exists(fpath):
+        safe_reply(message, f"❌ File `{fname}` not found in your workspace.", parse_mode='Markdown')
+        return
+
+    try:
+        with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+    except Exception as e:
+        safe_reply(message, f"❌ Cannot read file: `{e}`", parse_mode='Markdown')
+        return
+
+    # ---- Python ----
+    if fname.endswith('.py'):
+        try:
+            tree = ast.parse(content)
+        except SyntaxError as e:
+            safe_reply(message, f"❌ Python syntax error at line {e.lineno}: `{e.msg}`", parse_mode='Markdown')
+            return
+
+        modules = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    modules.add(a.name.split('.')[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    modules.add(node.module.split('.')[0])
+
+        to_install = []
+        for m in sorted(modules):
+            if _is_module_importable(m):
+                continue
+            to_install.append(TELEGRAM_MODULES.get(m.lower(), m))
+
+        if not to_install:
+            safe_reply(message,
+                       f"✅ All imports in `{fname}` are already satisfied.\n\n_Detected:_ `{', '.join(sorted(modules)) or '(none)'}`",
+                       parse_mode='Markdown')
+            return
+
+        safe_reply(message,
+                   f"🔍 *{fname}* needs {len(to_install)} package(s):\n`{' '.join(to_install)}`\n\n⏳ Installing...",
+                   parse_mode='Markdown')
+        try:
+            r = run_pip_command([sys.executable, '-m', 'pip', 'install'] + to_install)
+            out = ((r.stdout or '') + '\n' + (r.stderr or '')).strip()
+            icon = "✅" if r.returncode == 0 else "❌"
+            safe_reply(message, f"{icon} *Dependency install finished* (exit `{r.returncode}`):\n{_terminal_output_block(out)}", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ pip error: `{e}`", parse_mode='Markdown')
+        return
+
+    # ---- Node.js ----
+    if fname.endswith('.js'):
+        raw_reqs = set(re.findall(r"require\s*\(\s*['\"]([^'\"]+)['\"]\s*\)", content))
+        raw_reqs |= set(re.findall(r"(?:from|import)\s+['\"]([^'\"]+)['\"]", content))
+        raw_reqs = {r for r in raw_reqs if not r.startswith('.') and not r.startswith('/')}
+
+        to_install = set()
+        for r in raw_reqs:
+            if r.startswith('@'):
+                parts = r.split('/')
+                to_install.add('/'.join(parts[:2]) if len(parts) >= 2 else r)
+            else:
+                to_install.add(r.split('/')[0])
+
+        if not to_install:
+            safe_reply(message, f"✅ No external npm packages found in `{fname}`.", parse_mode='Markdown')
+            return
+
+        pkgs = sorted(to_install)
+        safe_reply(message,
+                   f"🔍 *{fname}* needs {len(pkgs)} npm package(s):\n`{' '.join(pkgs)}`\n\n⏳ Installing...",
+                   parse_mode='Markdown')
+        use_shell = (os.name == 'nt')
+        try:
+            r = subprocess.run([NPM_BIN, 'install'] + pkgs, capture_output=True, text=True,
+                               check=False, cwd=user_folder, shell=use_shell,
+                               timeout=300, encoding='utf-8', errors='ignore')
+            out = ((r.stdout or '') + '\n' + (r.stderr or '')).strip()
+            icon = "✅" if r.returncode == 0 else "❌"
+            safe_reply(message, f"{icon} *npm install finished* (exit `{r.returncode}`):\n{_terminal_output_block(out)}", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ npm error: `{e}`", parse_mode='Markdown')
+        return
+
+    safe_reply(message, "❌ `deps` only supports `.py` and `.js` files.", parse_mode='Markdown')
+
+
+def process_terminal_command(message):
+    user_id = message.from_user.id
+    if not terminal_sessions.get(user_id):
+        return
+    if not message.text:
+        safe_reply(message, "❌ Please send a text command.")
+        return
+
+    raw = message.text.strip()
+    lower = raw.lower()
+
+    if lower in ('exit', 'quit', 'close', 'logout', 'q'):
+        terminal_sessions.pop(user_id, None)
+        safe_reply(message, "🔒 *Terminal session closed.*\n\nUse /terminal to reopen.", parse_mode='Markdown')
+        return
+
+    if lower in ('help', '?', 'man', 'commands'):
+        safe_reply(message, TERMINAL_HELP, parse_mode='Markdown')
+        return
+
+    if lower in ('ls', 'dir', 'files', 'list'):
+        user_folder = get_user_folder(user_id)
+        try:
+            entries = []
+            for item in sorted(os.listdir(user_folder)):
+                full = os.path.join(user_folder, item)
+                if os.path.isdir(full):
+                    entries.append(f"📁 {item}/")
+                else:
+                    size = os.path.getsize(full)
+                    size_str = f"{size}B" if size < 1024 else f"{size/1024:.1f}KB" if size < 1024*1024 else f"{size/1024/1024:.1f}MB"
+                    entries.append(f"📄 {item} ({size_str})")
+            if not entries:
+                safe_reply(message, "📂 *(empty workspace)*", parse_mode='Markdown')
+            else:
+                safe_reply(message, f"📂 *Workspace files:*\n{_terminal_output_block(chr(10).join(entries))}", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ ls error: `{e}`", parse_mode='Markdown')
+        return
+
+    if lower.startswith('cat '):
+        fname = raw[4:].strip().strip('"\'')
+        if not fname or '..' in fname or '/' in fname or '\\' in fname or fname.startswith('.'):
+            safe_reply(message, "❌ Invalid or unsafe filename.")
+            return
+        user_folder = get_user_folder(user_id)
+        fpath = os.path.join(user_folder, fname)
+        if not os.path.exists(fpath) or not os.path.isfile(fpath):
+            safe_reply(message, f"❌ File `{fname}` not found.", parse_mode='Markdown')
+            return
+        try:
+            size = os.path.getsize(fpath)
+            if size > 200 * 1024:
+                safe_reply(message, f"❌ File too large ({size/1024:.1f} KB > 200 KB).", parse_mode='Markdown')
+                return
+            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(3500)
+            safe_reply(message, f"📄 *{fname}:*\n{_terminal_output_block(content)}", parse_mode='Markdown')
+        except Exception as e:
+            safe_reply(message, f"❌ cat error: `{e}`", parse_mode='Markdown')
+        return
+
+    if lower.startswith('pip ') or lower.startswith('pip3 '):
+        cmd_args = raw.split()[1:]
+        if not cmd_args:
+            safe_reply(message, "❌ Usage: `pip install <package>`", parse_mode='Markdown')
+            return
+        allowed = {'install', 'uninstall', 'list', 'freeze', 'show'}
+        if cmd_args[0].lower() not in allowed:
+            safe_reply(message, f"❌ pip action `{cmd_args[0]}` not allowed.\nUse: `{', '.join(sorted(allowed))}`", parse_mode='Markdown')
+            return
+        _run_terminal_pip(message, cmd_args, user_id)
+        return
+
+    if lower.startswith('npm '):
+        cmd_args = raw.split()[1:]
+        if not cmd_args:
+            safe_reply(message, "❌ Usage: `npm install <package>`", parse_mode='Markdown')
+            return
+        allowed = {'install', 'i', 'list', 'ls'}
+        if cmd_args[0].lower() not in allowed:
+            safe_reply(message, f"❌ npm action `{cmd_args[0]}` not allowed. Use: `install` or `list`.", parse_mode='Markdown')
+            return
+        _run_terminal_npm(message, cmd_args, user_id)
+        return
+
+    if lower.startswith('deps '):
+        fname = raw[5:].strip().strip('"\'')
+        if not fname:
+            safe_reply(message, "❌ Usage: `deps <file.py|file.js>`", parse_mode='Markdown')
+            return
+        _run_terminal_deps(message, fname, user_id)
+        return
+
+    safe_reply(message, f"❓ Unknown command: `{raw[:40]}`\n\nType `help` to list commands.", parse_mode='Markdown')
+
+
+# --- Terminal commands & callbacks ---
+@bot.message_handler(commands=['terminal'])
+def command_terminal(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    if message.from_user.id in banned_users:
+        safe_reply(message, "❌ You are banned.")
+        return
+    open_terminal_for_user(message.chat.id, message.from_user.id)
+
+
+@bot.message_handler(commands=['exit'])
+def command_terminal_exit(message):
+    if not terminal_sessions.get(message.from_user.id):
+        safe_reply(message, "❌ No active terminal session.")
+        return
+    terminal_sessions.pop(message.from_user.id, None)
+    safe_reply(message, "🔒 Terminal closed.", parse_mode='Markdown')
+
+
+def _logic_open_terminal(message):
+    if message.from_user.id in banned_users:
+        safe_reply(message, "❌ You are banned.")
+        return
+    open_terminal_for_user(message.chat.id, message.from_user.id)
+
+
+def term_open_callback(call):
+    bot.answer_callback_query(call.id, "🖥️ Opening terminal...")
+    open_terminal_for_user(call.message.chat.id, call.from_user.id)
+
+
+def term_close_callback(call):
+    terminal_sessions.pop(call.from_user.id, None)
+    bot.answer_callback_query(call.id, "🔒 Terminal closed.")
+    try:
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    except Exception:
+        pass
+    bot.send_message(call.message.chat.id, "🔒 *Terminal session closed.*", parse_mode='Markdown')
+
+
+def term_help_callback(call):
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, TERMINAL_HELP, parse_mode='Markdown')
+
+
+def term_ls_callback(call):
+    bot.answer_callback_query(call.id)
+    user_id = call.from_user.id
+    user_folder = get_user_folder(user_id)
+    entries = []
+    for item in sorted(os.listdir(user_folder)):
+        full = os.path.join(user_folder, item)
+        if os.path.isdir(full):
+            entries.append(f"📁 {item}/")
+        else:
+            size = os.path.getsize(full)
+            size_str = f"{size}B" if size < 1024 else f"{size/1024:.1f}KB" if size < 1024*1024 else f"{size/1024/1024:.1f}MB"
+            entries.append(f"📄 {item} ({size_str})")
+    if not entries:
+        bot.send_message(call.message.chat.id, "📂 *(empty workspace)*", parse_mode='Markdown')
+    else:
+        bot.send_message(call.message.chat.id, f"📂 *Workspace files:*\n{_terminal_output_block(chr(10).join(entries))}", parse_mode='Markdown')
+
+
+# Register text-button → logic (safe here because _logic_open_terminal is now defined)
+BUTTON_TEXT_TO_LOGIC["🖥️ Terminal"] = _logic_open_terminal
+
+
+# Message handler for terminal input (defined AFTER button handler so menu buttons win)
+@bot.message_handler(func=lambda m: (
+    terminal_sessions.get(m.from_user.id)
+    and m.content_type == 'text'
+    and m.text
+    and not m.text.startswith('/')
+    and m.text not in BUTTON_TEXT_TO_LOGIC
+))
+def terminal_message_handler(message):
+    if not check_joined(message.from_user.id, message.chat.id): return
+    process_terminal_command(message)
+# =========================================================================
+# End of small terminal block
+# =========================================================================
+
 
 if __name__ == '__main__':
     keep_alive()
